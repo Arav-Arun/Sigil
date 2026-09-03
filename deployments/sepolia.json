@@ -1,0 +1,21 @@
+{
+  "contract": "SigilRegistry",
+  "network": "sepolia",
+  "chainId": 11155111,
+  "address": "0xc92D2fDe2757b14e5EB6Aef849E41aBa1F395517",
+  "deployer": "0xdBB0b8dC6Ec8b712B372C393e75585D1f916E8DC",
+  "deploymentTx": "0x4a804c88ddad8de9d8a57c0c51489974c1cf90d834af9f6206e0210efc9abb6b",
+  "blockNumber": 11621526,
+  "gasUsed": 631180,
+  "compiler": "0.8.34+commit.80d5c536",
+  "evmVersion": "osaka",
+  "optimizer": {
+    "enabled": false
+  },
+  "sourceCommit": "f1b00046779d457446d54509655ec288905d9140",
+  "sourceDirty": false,
+  "runtimeBytecodeSha256": "c5708dce1ff244cd0b30fc735943fbb495f5c279c98674255f0615ed2050133e",
+  "explorer": "https://sepolia.etherscan.io/address/0xc92D2fDe2757b14e5EB6Aef849E41aBa1F395517",
+  "sourcify": "https://repo.sourcify.dev/11155111/0xc92D2fDe2757b14e5EB6Aef849E41aBa1F395517/",
+  "abiSource": "sigil/chain.py REGISTRY_ABI"
+}

@@ -1,0 +1,32 @@
+{
+  "language": "Solidity",
+  "settings": {
+    "evmVersion": "osaka",
+    "outputSelection": {
+      "*": {
+        "": [
+          "ast"
+        ],
+        "*": [
+          "abi",
+          "evm.bytecode.linkReferences",
+          "evm.bytecode.object",
+          "evm.bytecode.opcodes",
+          "evm.bytecode.sourceMap",
+          "evm.deployedBytecode.immutableReferences",
+          "evm.deployedBytecode.linkReferences",
+          "evm.deployedBytecode.object",
+          "evm.deployedBytecode.opcodes",
+          "evm.deployedBytecode.sourceMap",
+          "evm.methodIdentifiers"
+        ]
+      }
+    },
+    "remappings": []
+  },
+  "sources": {
+    "project/contracts/SigilRegistry.sol": {
+      "content": "// SPDX-License-Identifier: MIT\npragma solidity 0.8.34;\n\n/// @title SigilRegistry\n/// @notice Tamper-evident anchoring for Sigil evidence bundles.\n/// @dev The contract is deliberately minimal. All of the interesting work, canonical\n///      JSON, domain-separated Merkle leaves, per-field inclusion proofs, happens off\n///      chain and is verifiable by anyone holding the bundle. What must be on chain is\n///      only the part that needs an immutable, independently timestamped witness: the\n///      32-byte root, who submitted it, and when.\n///\n///      Nothing personal is ever stored here. No images, no embeddings, no names, no\n///      post text, only a hash. That is a privacy property, not an optimisation:\n///      biometric data must not be written to an immutable public ledger.\ncontract SigilRegistry {\n    /// @param submitter The address that anchored this root.\n    /// @param anchoredAt Block timestamp of the anchoring transaction.\n    /// @param schemaVersion Evidence-manifest schema the root was built under.\n    struct Anchor {\n        address submitter;\n        uint64 anchoredAt;\n        uint16 schemaVersion;\n    }\n\n    /// @notice Anchored evidence roots, keyed by the Merkle root itself.\n    mapping(bytes32 root => Anchor anchor) public anchors;\n\n    /// @notice Number of roots anchored, exposed for cheap sanity checks.\n    uint256 public totalAnchored;\n\n    event Anchored(\n        bytes32 indexed root,\n        address indexed submitter,\n        uint64 anchoredAt,\n        uint16 schemaVersion\n    );\n\n    /// @dev The zero root is what an uninitialised or failed off-chain build produces.\n    ///      Accepting it would let a broken run look successful.\n    error ZeroRoot();\n\n    /// @dev Re-anchoring would overwrite the original timestamp and submitter, which is\n    ///      precisely the record the proof depends on.\n    error AlreadyAnchored(bytes32 root, address submitter, uint64 anchoredAt);\n\n    error UnknownRoot(bytes32 root);\n\n    /// @notice Anchor an evidence root.\n    /// @param root The Merkle root of a canonical evidence manifest.\n    /// @param schemaVersion The manifest schema version used to build `root`.\n    function anchor(bytes32 root, uint16 schemaVersion) external {\n        if (root == bytes32(0)) revert ZeroRoot();\n\n        Anchor memory existing = anchors[root];\n        if (existing.anchoredAt != 0) {\n            revert AlreadyAnchored(root, existing.submitter, existing.anchoredAt);\n        }\n\n        uint64 timestamp = uint64(block.timestamp);\n        anchors[root] = Anchor({\n            submitter: msg.sender,\n            anchoredAt: timestamp,\n            schemaVersion: schemaVersion\n        });\n        unchecked {\n            ++totalAnchored;\n        }\n\n        emit Anchored(root, msg.sender, timestamp, schemaVersion);\n    }\n\n    /// @notice Read an anchor, reverting when the root was never anchored.\n    /// @dev Verifiers that want a boolean should call `isAnchored` instead; this\n    ///      variant exists so a mistaken \"verified\" cannot come from a zero struct.\n    function get(bytes32 root) external view returns (Anchor memory) {\n        Anchor memory record = anchors[root];\n        if (record.anchoredAt == 0) revert UnknownRoot(root);\n        return record;\n    }\n\n    /// @notice Non-reverting existence check with the full record.\n    function verify(bytes32 root)\n        external\n        view\n        returns (bool exists, address submitter, uint64 anchoredAt, uint16 schemaVersion)\n    {\n        Anchor memory record = anchors[root];\n        exists = record.anchoredAt != 0;\n        return (exists, record.submitter, record.anchoredAt, record.schemaVersion);\n    }\n\n    /// @notice Cheapest possible existence check.\n    function isAnchored(bytes32 root) external view returns (bool) {\n        return anchors[root].anchoredAt != 0;\n    }\n}\n"
+    }
+  }
+}

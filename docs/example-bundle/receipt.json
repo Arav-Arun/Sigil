@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "chain_id": 11155111,
+  "contract_address": "0xc92D2fDe2757b14e5EB6Aef849E41aBa1F395517",
+  "evidence_root": "0x2c5613e738f4d4e11a14bfd554e72828137cde682a43ae4fab9b8ed46f3a8925",
+  "transaction_hash": "0xf815a7f13825fb46fc28abe3bb9df88a1fe4eb11d41d098032e7b4e90345fadd",
+  "block_number": 11621561,
+  "submitter": "0xdBB0b8dC6Ec8b712B372C393e75585D1f916E8DC",
+  "anchored_at": "2026-09-02T19:16:00Z",
+  "gas_used": 53480,
+  "explorer_url": "https://sepolia.etherscan.io/tx/0xf815a7f13825fb46fc28abe3bb9df88a1fe4eb11d41d098032e7b4e90345fadd"
+}

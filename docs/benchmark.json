@@ -1,0 +1,48 @@
+{
+  "model": "insightface/buffalo_l:scrfd_10g+arcface_w600k_r50+fliptta",
+  "providers": [
+    "detector:CPUExecutionProvider",
+    "embedder:CoreMLExecutionProvider"
+  ],
+  "dataset": "LFW (sklearn fetch_lfw_pairs, funneled, colour)",
+  "calibration_pairs": 8191,
+  "test_pairs": 997,
+  "test_positive": 498,
+  "test_negative": 499,
+  "detection_failures": 12,
+  "coverage": 0.997,
+  "tar_at_fmr_1e3_with_failures": 0.98298,
+  "roc_auc": 0.99555,
+  "eer": 0.01204,
+  "match_threshold": 0.795,
+  "reject_threshold": 0.845,
+  "tar_at_fmr_1e2": 0.98795,
+  "tar_at_fmr_1e3": 0.98594,
+  "false_matches": 1,
+  "false_non_matches": 6,
+  "inconclusive": 6,
+  "positive_mean": 0.31469,
+  "negative_mean": 0.99884,
+  "detect_latency": {
+    "samples": 18398,
+    "p50_ms": 54.57,
+    "p95_ms": 97.21,
+    "mean_ms": 62.57
+  },
+  "embed_latency": {
+    "samples": 18386,
+    "p50_ms": 34.42,
+    "p95_ms": 47.67,
+    "mean_ms": 35.26
+  },
+  "notes": [
+    "Thresholds calibrated on 8191 pairs (LFW train + 10_folds) at FMR<=0.001.",
+    "Metrics reported on 997 disjoint held-out test pairs.",
+    "False matches: 1/499 impostor pairs.",
+    "False non-matches: 6/498 genuine pairs.",
+    "Coverage 0.9970: 3 of 1000 test pairs had a face the detector could not find. Metrics above are conditional on the pairs it did find.",
+    "The detection cascade lowers headline AUC because it stops silently discarding the hardest images. That is the metric becoming more honest, not the model getting worse; coverage rises and the pipeline answers more queries.",
+    "Flip TTA follows the published ArcFace evaluation protocol, which averages a crop with its mirror. InsightFace's own get_feat() does not do this.",
+    "LFW is a frontal, celebrity-photo benchmark; social-media media is harder."
+  ]
+}

@@ -1,0 +1,84 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sigil"
+version = "0.3.0"
+description = "A face, sealed. Find a face on the public web and anchor the evidence on-chain."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { text = "MIT" }
+authors = [{ name = "Sigil contributors" }]
+dependencies = [
+    "httpx>=0.28,<0.29",
+    "numpy>=2.2,<3",
+    "pillow>=11.3,<13",
+    "pydantic>=2.11,<3",
+    "pydantic-settings>=2.10,<3",
+    "python-dotenv>=1.1,<2",
+    "requests>=2.32,<3",
+    "rich>=14.1,<15",
+]
+
+[project.optional-dependencies]
+chain = [
+    "eth-account>=0.13,<1",
+    "web3>=7.13,<8",
+]
+# The face stack runs InsightFace's ONNX weights directly on onnxruntime. TensorFlow,
+# DeepFace and retinaface are deliberately absent: DeepFace cannot import against
+# TF 2.21 (retinaface requires tf-keras), and the ONNX path is faster and more accurate.
+ml = [
+    "insightface>=0.7.3,<0.8",
+    "onnx>=1.17,<2",
+    "onnxruntime>=1.22,<2",
+    "opencv-python-headless>=4.11,<5",
+]
+bench = ["scikit-learn>=1.5,<2"]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.17,<2",
+    "pytest>=8.4,<9",
+    "pytest-cov>=6.2,<8",
+    "respx>=0.22,<1",
+    "ruff>=0.12,<1",
+    "types-requests>=2.32,<3",
+]
+
+[project.scripts]
+sigil = "sigil.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["sigil"]
+artifacts = ["sigil/static/*.html"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-config --strict-markers"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["sigil"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["insightface.*", "onnxruntime.*", "cv2.*", "sklearn.*"]
+ignore_missing_imports = true

@@ -1,0 +1,1229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sigil, AI face search with verifiable proof</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    /* palette */
+    --page:#fbfbff;
+    --white:#ffffff;
+    --ink:#1c1e25;          /* headings */
+    --purple:#312758;       /* body text */
+    --purple-mid:#56538d;   /* nav links */
+    --purple-soft:#6c6c9c;  /* muted */
+    --indigo:#5a66e9;       /* primary */
+    --lav:#e9eafd;          /* pill fill */
+    --lav-soft:#f4f5fe;     /* section fill */
+    --cream:#fbfae6;        /* dropzone fill */
+    --gold:#e1b033;         /* dropzone border */
+    --orange:#d67419;       /* accent link */
+    --red:#f44c52;
+
+    --ok:#1d9a57;   --ok-fill:#e7f7ee;
+    --bad:#e0453f;  --bad-fill:#fdedec;
+    --warn:#c07b12; --warn-fill:#fdf6e6;
+
+    --shadow-sm:0 2px 8px rgba(89,99,168,.16);
+    --shadow-lg:0 4px 20px rgba(90,102,233,.20);
+  }
+  * { box-sizing:border-box; }
+  html { height:100%; }
+  body { min-height:100%; }
+  body {
+    margin:0; background:var(--page); color:var(--purple);
+    font:500 16px/1.5 "Noto Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  a { color:inherit; text-decoration:none; }
+  button { font:inherit; cursor:pointer; border:none; background:none; color:inherit; }
+  .hidden { display:none !important; }
+
+  /* ══════════ nav ══════════ */
+  /* Three equal columns, so the centre group is centred on the viewport rather
+     than on whatever space the brand and status happen to leave over. */
+  nav {
+    height:56px; background:var(--white); display:grid;
+    grid-template-columns:1fr auto 1fr; align-items:center;
+    padding:0 24px; position:sticky; top:0; z-index:60;
+  }
+  .brand { display:flex; align-items:center; gap:8px; font-weight:700; font-size:19px;
+           color:var(--purple); letter-spacing:-.01em; justify-self:start; }
+  .brand svg { width:23px; height:23px; color:var(--indigo); }
+  .navmid { display:flex; gap:30px; justify-self:center; }
+  .navmid a { font-size:16px; font-weight:600; color:var(--purple-mid); padding:4px 0;
+              border-bottom:2px solid transparent; }
+  .navmid a:hover { color:var(--indigo); }
+  .navmid a.on { color:var(--purple); border-bottom-color:var(--purple); }
+  .navend { display:flex; align-items:center; gap:12px; justify-self:end; }
+  .state { display:flex; align-items:center; gap:7px; font-size:14.5px; color:var(--purple-soft);
+           white-space:nowrap; }
+  @media (max-width:900px) { .navmid { display:none; } }
+  .dot { width:7px; height:7px; border-radius:50%; background:#c9c8dc; flex:0 0 7px; }
+  .dot.on { background:var(--ok); }
+  .dot.warn { background:var(--warn); }
+
+  .btn { border-radius:8px; padding:8px 16px; font-size:15px; font-weight:600;
+         transition:filter .12s, background .12s, transform .05s; }
+  .btn:active { transform:translateY(1px); }
+  .btn-indigo { background:var(--indigo); color:#fff; }
+  .btn-indigo:hover { filter:brightness(1.08); }
+  .btn-orange { background:var(--orange); color:#fff; }
+  .btn-orange:hover { filter:brightness(1.07); }
+  .btn-ghost { background:var(--white); color:var(--purple); border:1px solid #e3e3f0; }
+  .btn-ghost:hover { border-color:var(--indigo); color:var(--indigo); }
+
+  /* ══════════ hero ══════════ */
+  .hero { position:relative; padding:56px 24px 90px; overflow:hidden; min-height:760px; }
+  /* The scatter is clipped to the hero so a tile can never drift into the section
+     below, which is exactly what happened when the tiles were siblings of it. */
+  #scatter { position:absolute; inset:0; overflow:hidden; pointer-events:none; }
+  #scatter > * { pointer-events:auto; }
+  .hero-bg {
+    position:absolute; inset:0; pointer-events:none;
+    background-image:linear-gradient(#eeeefb 1px, transparent 1px),
+                     linear-gradient(90deg,#eeeefb 1px, transparent 1px);
+    background-size:64px 64px;
+    -webkit-mask-image:radial-gradient(ellipse 62% 58% at 50% 42%, transparent 46%, #000 82%);
+    mask-image:radial-gradient(ellipse 62% 58% at 50% 42%, transparent 46%, #000 82%);
+  }
+  .hero-in { position:relative; max-width:620px; margin:0 auto; text-align:center; }
+  h1 { font-size:48px; line-height:1.42; font-weight:700; color:var(--ink); margin:0 0 6px;
+       letter-spacing:-.005em; }
+  h1 em { font-style:normal; color:var(--indigo); }
+  .lede { font-size:16px; color:var(--ink); margin:0 0 30px; }
+
+  .searchcard { background:var(--white); border-radius:12px; padding:20px;
+                box-shadow:var(--shadow-lg); }
+  .dz {
+    background:var(--cream); border:2px dashed var(--gold); border-radius:4px;
+    padding:26px 18px; text-align:center; cursor:pointer;
+    transition:background .14s, border-color .14s;
+  }
+  .dz:hover, .dz.over { background:#f8f5d4; border-color:#c99a1f; }
+  .dz svg { width:32px; height:32px; color:var(--orange); }
+  .dz .l1 { font-size:20px; font-weight:600; color:var(--purple); margin-top:10px; }
+  .dz .l2 { font-size:20px; font-weight:600; color:var(--orange); }
+  .dz .l3 { font-size:14.5px; font-weight:500; color:var(--purple-soft); margin-top:9px; }
+  .namefield { display:block; margin-top:18px; text-align:left; }
+  .namefield > span { display:block; font-size:14px; font-weight:600; color:var(--purple-mid);
+                      margin-bottom:7px; }
+  .namefield input { width:100%; border:1px solid #e3e3f0; border-radius:8px;
+                     padding:11px 13px; font:500 15px/1.3 "Noto Sans",sans-serif;
+                     color:var(--purple); background:var(--white); }
+  .namefield input:focus { outline:none; border-color:var(--indigo); }
+  .namefield em { display:block; font-style:normal; font-size:13px; line-height:1.55;
+                  color:var(--purple-soft); margin-top:8px; }
+
+  /* clickable sample gallery */
+  .try { margin-top:28px; }
+  .try .cap { font-size:15px; color:var(--purple-mid); margin-bottom:12px; }
+  .samples { display:flex; gap:12px; justify-content:center; flex-wrap:wrap; }
+  .samples-empty { font-size:14.5px; color:var(--purple-soft); background:var(--lav-soft);
+                   border-radius:10px; padding:14px 18px; display:inline-block; }
+  .samples-empty code { font-family:ui-monospace,Menlo,monospace; font-size:15px;
+                        background:var(--white); padding:2px 6px; border-radius:4px; }
+
+  /* Scattered sample photos. Each one is a real face in data/samples/ and a real
+     one-click search, so the decoration and the demo are the same thing. */
+  .tile-f { position:absolute; border-radius:8px; overflow:hidden; box-shadow:var(--shadow-sm);
+            padding:0; border:none; background:var(--lav-soft); cursor:pointer;
+            transition:transform .16s ease, box-shadow .16s ease; }
+  /* Faces sit high in a portrait, so a centred crop takes the top of the head off.
+     Biasing the crop upward keeps the face whole in a landscape slot. */
+  .tile-f img { display:block; width:100%; height:100%; object-fit:cover;
+                object-position:50% 26%; }
+  .tile-f::after {
+    content:""; position:absolute; inset:0; background:var(--indigo); opacity:0;
+    transition:opacity .16s ease;
+  }
+  .tile-f .mag {
+    position:absolute; inset:0; display:grid; place-items:center; opacity:0;
+    transition:opacity .16s ease; z-index:1; color:#fff; pointer-events:none;
+  }
+  .tile-f .mag svg { width:26px; height:26px; }
+  .tile-f:hover { transform:translateY(-2px); box-shadow:var(--shadow-lg); }
+  .tile-f:hover::after { opacity:.62; }
+  .tile-f:hover .mag, .tile-f:focus-visible .mag { opacity:1; }
+  .tile-f:focus-visible { outline:2px solid var(--indigo); outline-offset:3px; }
+  .tile-f.busy { pointer-events:none; }
+  .tile-f.busy::after { opacity:.62; }
+  .tile-f.busy .mag { opacity:1; }
+  .pill-f { position:absolute; background:var(--lav); color:var(--purple); border-radius:100px;
+            padding:8px 12px; font-size:15px; font-weight:600; }
+  @media (max-width:1120px) { .tile-f, .pill-f { display:none; } }
+  /* measured-numbers strip, where a marketing page would put press logos */
+  .strip { max-width:1000px; margin:34px auto 0; display:flex; flex-wrap:wrap;
+           justify-content:center; gap:14px 42px; padding:22px 24px;
+           border-top:1px solid #ececf6; }
+  .strip div { text-align:center; }
+  .strip .v { font-size:20px; font-weight:700; color:var(--ink); letter-spacing:-.01em;
+              font-variant-numeric:tabular-nums; }
+  .strip .k { font-size:15px; font-weight:600; color:var(--purple-soft); margin-top:2px; }
+  .strip .src { flex:0 0 100%; text-align:center; font-size:13.5px; color:#a5a4c0; margin-top:4px; }
+  /* ══════════ architecture diagram ══════════ */
+  .arch { max-width:1180px; margin:0 auto; background:var(--white); border-radius:16px;
+          padding:30px 26px 22px; box-shadow:var(--shadow-lg); }
+  .arch svg { width:100%; height:auto; display:block; overflow:visible; }
+  .arch .lbl { font:700 13px/1 "Noto Sans",sans-serif; fill:var(--purple-soft);
+               letter-spacing:.06em; text-transform:uppercase; }
+  .arch .box-t { font:700 15px/1 "Noto Sans",sans-serif; fill:var(--ink); }
+  .arch .box-s { font:500 12.5px/1 "Noto Sans",sans-serif; fill:var(--purple-soft); }
+  .arch .chip-t { font:600 13px/1 "Noto Sans",sans-serif; fill:var(--purple); }
+  .arch .chip-s { font:500 11.5px/1 "Noto Sans",sans-serif; fill:var(--purple-soft); }
+  .arch .card-bg { fill:var(--lav-soft); stroke:#dcdcf2; stroke-width:1.4; }
+  .arch .card-hi { fill:var(--lav); stroke:var(--indigo); stroke-width:1.7; }
+  .arch .card-gate { fill:#e7f7ee; stroke:var(--ok); stroke-width:1.7; }
+  .arch .card-chain { fill:#1a1836; stroke:#3a3570; stroke-width:1.4; }
+  .arch .chain-t { font:700 15px/1 "Noto Sans",sans-serif; fill:#c9ccff; }
+  .arch .chain-s { font:500 12.5px/1 "Noto Sans",sans-serif; fill:#9a97c8; }
+  .arch .wire { fill:none; stroke:#c9c8e8; stroke-width:1.8; }
+  .arch .wire-hi { fill:none; stroke:var(--indigo); stroke-width:2.2; }
+  .arch .flowing { stroke-dasharray:6 7; animation:flow 1.5s linear infinite; }
+  @keyframes flow { to { stroke-dashoffset:-26; } }
+  .arch .badge { font:700 11px/1 "Noto Sans",sans-serif; fill:#fff; letter-spacing:.04em; }
+  .arch-key { display:flex; flex-wrap:wrap; gap:8px 20px; justify-content:center;
+              margin-top:20px; padding-top:18px; border-top:1px solid #ececf6; }
+  .arch-key span { display:flex; align-items:center; gap:7px; font-size:13px;
+                   color:var(--purple-soft); }
+  .arch-key i { width:11px; height:11px; border-radius:3px; display:block; }
+  @media (prefers-reduced-motion:reduce) { .arch .flowing { animation:none; } }
+
+  /* ══════════ explainer ══════════ */
+  .explain { padding:16px 24px 90px; }
+  .ex-head { max-width:660px; margin:0 auto 40px; text-align:center; }
+  .eyebrow { display:inline-block; background:var(--lav); color:var(--indigo);
+             border-radius:100px; padding:5px 13px; font-size:14px; font-weight:700;
+             letter-spacing:.04em; text-transform:uppercase; margin-bottom:14px; }
+  .ex-head h2 { font-size:34px; line-height:1.22; letter-spacing:-.02em; color:var(--ink);
+                margin:0 0 12px; font-weight:700; }
+  .ex-head p { margin:0; font-size:16px; color:var(--purple-soft); line-height:1.6; }
+
+  .flow { max-width:1120px; margin:0 auto; padding:0; list-style:none;
+          display:grid; gap:18px; grid-template-columns:repeat(auto-fit,minmax(206px,1fr)); }
+  .flow li { position:relative; background:var(--white); border-radius:14px; padding:22px 20px 20px;
+             box-shadow:var(--shadow-sm); }
+  .fnum { position:absolute; top:-11px; left:20px; width:24px; height:24px; border-radius:50%;
+          background:var(--indigo); color:#fff; font-size:14px; font-weight:700;
+          display:grid; place-items:center; }
+  .fart { width:88px; height:64px; display:block; margin:6px 0 12px; overflow:visible; }
+  .fart .s1 { fill:var(--lav-soft); stroke:var(--indigo); stroke-width:2; }
+  .fart .s2 { fill:none; stroke:var(--indigo); stroke-width:2; stroke-linecap:round; }
+  .fart .s3 { fill:none; stroke:var(--gold); stroke-width:2; stroke-linecap:round; }
+  .fart .dash { stroke-dasharray:5 5; animation:march 1.4s linear infinite; }
+  .fart .orbit { stroke-dasharray:54; stroke-dashoffset:54; animation:sweep 2.6s ease-in-out infinite; }
+  .fart .pulse { animation:beat 2s ease-in-out infinite; transform-origin:38px 30px; }
+  @keyframes march { to { stroke-dashoffset:-20; } }
+  @keyframes sweep { 0% { stroke-dashoffset:54; } 55%,100% { stroke-dashoffset:0; } }
+  @keyframes beat { 0%,100% { transform:scale(1); opacity:.85; } 50% { transform:scale(1.35); opacity:.35; } }
+  .flow h3 { margin:0 0 6px; font-size:16px; font-weight:700; color:var(--ink); }
+  .flow p { margin:0; font-size:15px; line-height:1.6; color:var(--purple-soft); }
+
+  .chain-ex { margin-top:86px; }
+  .demo { max-width:1120px; margin:0 auto; background:var(--white); border-radius:16px;
+          box-shadow:var(--shadow-lg); padding:26px 24px; display:grid; gap:26px;
+          grid-template-columns:minmax(240px,1fr) minmax(280px,1.15fr) minmax(230px,1fr);
+          align-items:start; }
+  @media (max-width:900px) { .demo { grid-template-columns:1fr; } }
+  .dcol { min-width:0; }
+  .dlabel { font-size:13.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
+            color:var(--purple-soft); margin-bottom:10px; }
+  .dcol .btn { margin:10px 8px 0 0; padding:7px 13px; font-size:15px; }
+  .fields { display:grid; gap:7px; }
+  .fields .f { display:flex; gap:8px; align-items:baseline; background:var(--lav-soft);
+               border-radius:7px; padding:8px 11px; font-size:14px; transition:background .2s;
+               min-width:0; }
+  .fields .f k { color:var(--purple-soft); flex:0 0 auto; font-weight:600; }
+  .fields .f v { font-family:ui-monospace,Menlo,monospace; color:var(--purple);
+                 overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+  .fields .f.changed { background:var(--bad-fill); }
+  .fields .f.changed v { color:var(--bad); font-weight:600; }
+
+  .tree { width:100%; max-width:320px; height:auto; display:block; margin:0 auto 14px; }
+  .tree .tl { fill:none; stroke:#dcdcee; stroke-width:1.6; }
+  .tree .tn { fill:var(--lav-soft); stroke:var(--indigo); stroke-width:1.6; transition:fill .25s, stroke .25s; }
+  .tree .tn.root { fill:var(--lav); stroke-width:2.2; }
+  .tree .tn.hot { fill:var(--bad-fill); stroke:var(--bad); }
+  .root { background:var(--lav-soft); border-radius:8px; padding:10px 12px; font-size:15px;
+          word-break:break-all; line-height:1.5; transition:background .25s, color .25s; }
+  .root.hot { background:var(--bad-fill); color:var(--bad); }
+
+  .chip-card { background:var(--lav-soft); border-radius:10px; padding:12px 14px; }
+  .crow { display:flex; justify-content:space-between; gap:12px; padding:6px 0;
+          font-size:14px; border-bottom:1px solid #e6e6f4; }
+  .crow:last-child { border-bottom:none; }
+  .crow span { color:var(--purple-soft); }
+  .crow b { font-weight:600; color:var(--purple); overflow:hidden; text-overflow:ellipsis;
+            white-space:nowrap; max-width:56%; }
+  .verdictbox { margin-top:12px; border-radius:10px; padding:12px 14px; font-size:14.5px;
+                line-height:1.55; }
+  .verdictbox.ok  { background:var(--ok-fill);  color:#116b3c; }
+  .verdictbox.bad { background:var(--bad-fill); color:var(--bad); }
+  .verdictbox b { display:block; font-size:15px; margin-bottom:3px; }
+
+  .claims { max-width:1120px; margin:40px auto 0; display:grid; gap:18px;
+            grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); }
+  .claims > div { background:var(--white); border-radius:14px; padding:20px 22px;
+                  box-shadow:var(--shadow-sm); }
+  .claims h3 { margin:0 0 6px; font-size:15px; font-weight:700; color:var(--ink); }
+  .claims p { margin:0; font-size:15px; line-height:1.6; color:var(--purple-soft); }
+  .claims code, .demo code { font-family:ui-monospace,Menlo,monospace; font-size:14px;
+                             background:var(--lav-soft); padding:1px 5px; border-radius:4px; }
+
+  /* Scroll reveal. Nothing is hidden without JS: `.reveal` only dims once the observer
+     has marked the page as capable of revealing it again. */
+  .js .reveal { opacity:0; transform:translateY(14px); }
+  .js .reveal.in { opacity:1; transform:none;
+                   transition:opacity .55s ease var(--d,0ms), transform .55s cubic-bezier(.2,.7,.3,1) var(--d,0ms); }
+  @media (prefers-reduced-motion:reduce) {
+    .js .reveal { opacity:1; transform:none; }
+    .fart .dash, .fart .orbit, .fart .pulse { animation:none; }
+  }
+
+  /* Progress lives inside the results layout, so a run never swaps the whole
+     screen out from under the person watching it. */
+  .prog { margin-top:14px; background:var(--white); border-radius:12px; padding:16px 18px;
+          box-shadow:var(--shadow-sm); }
+  .prog h4 { margin:0 0 10px; font-size:15px; font-weight:700; color:var(--ink); }
+  .bar { height:4px; background:var(--lav); border-radius:2px; overflow:hidden; margin-bottom:14px; }
+  .bar i { display:block; height:100%; width:30%; background:var(--indigo); border-radius:2px;
+           animation:sweep 1.2s cubic-bezier(.45,0,.55,1) infinite; }
+  @keyframes sweep { 0%{margin-left:-30%} 100%{margin-left:100%} }
+  .steps div { display:flex; gap:9px; padding:3px 0; font-size:15px; color:#a5a4c0; }
+  .steps div.done { color:var(--ok); }
+  .steps div.now { color:var(--purple); font-weight:600; }
+
+  /* ══════════ results ══════════ */
+  .res { display:grid; grid-template-columns:352px 1fr; align-items:start; }
+  @media (max-width:980px) { .res { grid-template-columns:1fr; } }
+  aside { padding:20px; position:sticky; top:56px; }
+  @media (max-width:980px) { aside { position:static; } }
+  .panel { background:var(--white); border-radius:12px; padding:14px;
+           box-shadow:var(--shadow-sm); }
+  .panel > img { display:block; width:100%; border-radius:8px; }
+  .panelrow { display:flex; gap:8px; margin-top:14px; }
+  .panelrow .btn { flex:1; white-space:nowrap; }
+  .verdict { margin-top:14px; border-radius:12px; padding:14px 16px; }
+  .verdict.ok   { background:var(--ok-fill); }
+  .verdict.bad  { background:var(--bad-fill); }
+  .verdict.warn { background:var(--warn-fill); }
+  .verdict .h { font-weight:700; font-size:15.5px; display:flex; align-items:center; gap:8px; }
+  .verdict.ok .h{color:var(--ok)} .verdict.bad .h{color:var(--bad)} .verdict.warn .h{color:var(--warn)}
+  .verdict p { margin:7px 0 0; font-size:15px; color:var(--purple-mid); line-height:1.55; }
+
+  .dark { margin-top:14px; background:#1a1836; border-radius:12px; padding:18px 20px; color:#e6e6f6; }
+  .dark h4 { margin:0 0 5px; font-size:16px; font-weight:700; color:#9aa6ff; }
+  .dark p { margin:0 0 13px; font-size:14.5px; color:#a9a7c8; line-height:1.55; }
+  .dark .root { font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:14.5px;
+                word-break:break-all; background:#241f47; border-radius:8px; padding:9px 11px;
+                margin-bottom:13px; color:#cfcdea; }
+  .dark .btn { width:100%; }
+
+  .kv { margin-top:14px; font-size:15px; }
+  .kv > div { display:flex; gap:10px; padding:8px 0; border-bottom:1px solid #ececf6; }
+  .kv span:first-child { color:var(--purple-soft); flex:0 0 84px; }
+  .kv span:last-child { flex:1; word-break:break-all; color:var(--purple); }
+  .mono { font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:13.5px; }
+
+  .audit { margin-top:14px; background:var(--white); border-radius:12px; padding:16px 18px;
+           box-shadow:var(--shadow-sm); }
+  .audit h4 { margin:0 0 4px; font-size:15px; font-weight:700; color:var(--ink); }
+  .audit .lede2 { margin:0 0 11px; font-size:14px; color:var(--purple-soft); line-height:1.5; }
+  .audit .r { display:flex; align-items:center; gap:9px; padding:7px 0;
+              border-top:1px solid #f0f0f8; font-size:14px; }
+  .audit .r:first-of-type { border-top:none; }
+  .audit .rn { font-weight:700; flex:0 0 30px; color:var(--purple); }
+  .audit .ri { font-family:ui-monospace,Menlo,monospace; font-size:13px; color:var(--purple-soft);
+               flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .flag { font-size:13px; font-weight:700; padding:3px 7px; border-radius:100px; letter-spacing:.04em; }
+  .flag.on { background:var(--ok-fill); color:var(--ok); }
+  .flag.off { background:var(--lav); color:var(--purple-soft); }
+
+  main { padding:20px 24px 70px; min-width:0; }
+  .chips { display:flex; gap:14px; flex-wrap:wrap; align-items:center; margin-bottom:20px; }
+  .examined { font-size:14px; color:var(--purple-soft); line-height:1.55; max-width:62ch; }
+  .examined a { color:var(--indigo); font-weight:600; text-decoration:underline; }
+  .chip { display:flex; align-items:center; gap:9px; border-radius:100px; padding:9px 18px;
+          font-size:15px; font-weight:600; background:var(--white); color:var(--purple);
+          box-shadow:var(--shadow-sm); transition:filter .12s; }
+  .chip:hover { filter:brightness(.98); }
+  .chip.on { background:var(--orange); color:#fff; }
+  .chip .sq { width:17px; height:17px; border-radius:5px; flex:0 0 17px; }
+  .chip.on .sq { background:rgba(255,255,255,.42) !important; }
+  .chip .n { font-weight:600; opacity:.62; font-variant-numeric:tabular-nums; }
+  .chip.on .n { opacity:.9; }
+
+  .masonry { column-count:4; column-gap:18px; }
+  @media (max-width:1560px){ .masonry{column-count:3} }
+  @media (max-width:1140px){ .masonry{column-count:2} }
+  @media (max-width:640px) { .masonry{column-count:1} }
+  .card { break-inside:avoid; margin-bottom:20px; }
+  /* Paint-only hover, deliberately. Transforming a card promotes it to its own
+     compositing layer, and inside a CSS multi-column fragmentainer Chrome then fails to
+     repaint it: the tile vanished while the pointer was over it. Shadow and outline
+     change nothing about layout or layers, so they are safe here. */
+  .shot { position:relative; border-radius:8px; overflow:hidden; background:var(--white);
+          box-shadow:var(--shadow-sm); outline:2px solid transparent; outline-offset:-2px;
+          transition:box-shadow .14s ease, outline-color .14s ease; }
+  .card:hover .shot { box-shadow:var(--shadow-lg); outline-color:var(--indigo); }
+  .shot img { display:block; width:100%; }
+  .skel { border-radius:8px;
+          background:linear-gradient(100deg,var(--lav-soft) 30%,#fff 50%,var(--lav-soft) 70%);
+          background-size:220% 100%; animation:shimmer 1.4s linear infinite; }
+  @keyframes shimmer { to { background-position:-220% 0; } }
+  .noimg { display:flex; align-items:center; justify-content:center; height:158px;
+           color:#b3b2ca; font-size:14px; font-weight:500; background:var(--lav-soft); }
+  .stamp { position:absolute; left:10px; top:10px; display:inline-flex; align-items:center;
+           padding:4px 11px; border-radius:100px; font-size:14.5px; font-weight:700;
+           letter-spacing:.03em; color:#fff; backdrop-filter:blur(10px); }
+  .stamp.ok{background:rgba(29,154,87,.94)} .stamp.bad{background:rgba(224,69,63,.94)}
+  .stamp.warn{background:rgba(192,123,18,.94)}
+  .d { position:absolute; right:10px; bottom:10px; padding:4px 9px; border-radius:6px;
+       background:rgba(28,30,37,.82); color:#fff; font-size:13.5px; backdrop-filter:blur(10px);
+       font-family:ui-monospace,Menlo,monospace; }
+  .cmeta { padding:10px 2px 0; }
+  .srow { display:flex; align-items:center; gap:8px; }
+  .favi { width:20px; height:20px; border-radius:6px; flex:0 0 20px; display:flex;
+          align-items:center; justify-content:center; font-size:14px; font-weight:800; color:#fff; }
+  .favi.img { background:var(--lav-soft); overflow:hidden; }
+  .favi.img img { width:16px; height:16px; object-fit:contain; display:block; }
+  .cplat { font-size:15px; font-weight:600; color:var(--purple); flex:1; overflow:hidden;
+           text-overflow:ellipsis; white-space:nowrap; }
+  .copen { font-size:15px; font-weight:600; color:var(--indigo); opacity:0; transition:opacity .13s; }
+  .card:hover .copen { opacity:1; }
+  .curl { display:block; font-size:15px; color:var(--purple-soft); margin-top:4px;
+          font-family:ui-monospace,Menlo,monospace; overflow:hidden; text-overflow:ellipsis;
+          white-space:nowrap; }
+  .curl:hover { color:var(--indigo); text-decoration:underline; }
+  .prov { display:flex; gap:5px; flex-wrap:wrap; margin-top:9px; }
+  .rt { font-size:13px; font-weight:600; padding:3px 8px; border-radius:100px;
+        background:var(--lav); color:var(--purple-mid); }
+  .rt.media { background:#e6f0fb; color:#0a6bb5; }
+  .why { font-size:15px; color:var(--purple-soft); margin-top:8px; line-height:1.5; }
+  .nores { text-align:center; padding:60px 24px; color:var(--purple-soft);
+           max-width:56ch; margin:0 auto; }
+  .nores h3 { font-size:21px; color:var(--ink); margin:0 0 12px; }
+  .nores p { font-size:15px; line-height:1.65; margin:0 0 10px; }
+  .nores a { color:var(--indigo); font-weight:600; text-decoration:underline; }
+  #more { display:block; margin:6px auto 40px; }
+</style>
+</head>
+<body>
+
+<nav>
+  <a class="brand" href="/">
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="9.2" stroke="currentColor" stroke-width="1.9"/>
+      <circle cx="12" cy="12" r="4.2" stroke="currentColor" stroke-width="1.9"/>
+      <path d="M12 2.8v3.4M12 17.8v3.4M2.8 12h3.4M17.8 12h3.4"
+            stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+    </svg>
+    Sigil
+  </a>
+  <div class="navmid">
+    <a class="on" href="/">Face Search</a>
+    <a href="/verify" target="_blank">Verify Evidence</a>
+    <a href="#how" id="howLink">How it works</a>
+  </div>
+  <div class="navend">
+    <!-- No "everything is fine" badge. A status line that always says ready is decoration;
+         this one appears only when something is actually missing and needs fixing. -->
+    <div class="state hidden" id="state"></div>
+    <button class="btn btn-ghost hidden" id="newSearch">New search</button>
+  </div>
+</nav>
+
+<!-- ══════════ HERO ══════════ -->
+<section class="hero" id="landing">
+  <div class="hero-bg"></div>
+
+  <div id="scatter"></div>
+
+  <div class="hero-in">
+    <h1>AI Face Search<br>with <em>proof</em></h1>
+    <p class="lede">Find the post, verify the face, and seal the evidence on-chain.</p>
+
+    <div class="searchcard">
+      <div class="dz" id="drop">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M14.5 3H5.5A2.5 2.5 0 0 0 3 5.5v13A2.5 2.5 0 0 0 5.5 21h13a2.5 2.5 0 0 0 2.5-2.5v-9"/>
+          <circle cx="8.6" cy="8.6" r="1.7"/>
+          <path d="M20.5 14.5 16 10 5.5 20.5M18.5 2v6M15.5 5h6"/>
+        </svg>
+        <div class="l1">Drop, paste</div>
+        <div class="l2">or upload an image</div>
+        <div class="l3">JPEG, PNG or WebP, and it never leaves this machine</div>
+        <input type="file" id="file" accept="image/jpeg,image/png,image/webp" hidden>
+      </div>
+
+      <label class="namefield">
+        <span>Optional: a name to search alongside the face</span>
+        <input type="text" id="nameHint" placeholder="e.g. Colin Powell" spellcheck="false"
+               autocomplete="off">
+        <em>Reverse-image search only infers a name for people it already recognises, so
+            without one the pipeline cannot look anywhere a face index has not already been.
+            A name decides where to look and nothing else: every page it reaches still has to
+            pass the face gate.</em>
+      </label>
+    </div>
+
+    <div class="try hidden" id="try">
+      <div class="samples" id="samples"></div>
+    </div>
+  </div>
+
+  <div class="strip" id="strip"></div>
+</section>
+
+<!-- ══════════ HOW IT WORKS ══════════ -->
+<section class="explain" id="how">
+  <div class="ex-head reveal">
+    <div class="eyebrow">How it works</div>
+    <h2>From a face to a proof</h2>
+    <p>Five stages. Each one is inspectable, and the two that decide anything, the face
+       comparison and the hash, are the two you can re-run yourself.</p>
+  </div>
+
+  <ol class="flow">
+    <li class="reveal" style="--d:0ms">
+      <div class="fnum">1</div>
+      <svg class="fart" viewBox="0 0 88 64" aria-hidden="true">
+        <rect class="s1" x="20" y="8" width="48" height="48" rx="8"/>
+        <circle class="s2" cx="44" cy="28" r="9"/>
+        <path class="s2" d="M29 50c3-8 9-11 15-11s12 3 15 11"/>
+        <path class="s3 dash" d="M8 12h10M8 52h10M70 12h10M70 52h10"/>
+      </svg>
+      <h3>Detect and encode</h3>
+      <p>SCRFD finds the face, five landmarks align it, and ArcFace turns it into 512
+         numbers. Those numbers are biometric data: they stay in memory, and are never
+         logged, never written to the evidence, never put on a chain.</p>
+    </li>
+    <li class="reveal" style="--d:90ms">
+      <div class="fnum">2</div>
+      <svg class="fart" viewBox="0 0 88 64" aria-hidden="true">
+        <circle class="s1" cx="38" cy="30" r="17"/>
+        <path class="s2" d="M50 42 68 58"/>
+        <path class="s3 orbit" d="M38 13a17 17 0 0 1 0 34"/>
+        <circle class="s2 pulse" cx="38" cy="30" r="4"/>
+      </svg>
+      <h3>Search the live web</h3>
+      <p>One Google Lens call returns visual matches, the pages that discuss the image, and
+         the name it inferred. If that comes back thin, a second wave pivots on the name
+         across social platforms and re-queries a head-and-shoulders crop.</p>
+    </li>
+    <li class="reveal" style="--d:180ms">
+      <div class="fnum">3</div>
+      <svg class="fart" viewBox="0 0 88 64" aria-hidden="true">
+        <rect class="s1" x="6"  y="16" width="30" height="32" rx="6"/>
+        <rect class="s1" x="52" y="16" width="30" height="32" rx="6"/>
+        <circle class="s2" cx="21" cy="30" r="6"/>
+        <circle class="s2" cx="67" cy="30" r="6"/>
+        <path class="s3 dash" d="M38 32h12"/>
+      </svg>
+      <h3>Fetch and compare</h3>
+      <p>Every candidate's image is downloaded and every face in it is compared against
+         yours. The decision is a calibrated distance, so a result that ranked first in the
+         search cannot be promoted past the face check.</p>
+    </li>
+    <li class="reveal" style="--d:270ms">
+      <div class="fnum">4</div>
+      <svg class="fart" viewBox="0 0 88 64" aria-hidden="true">
+        <path class="s3" d="M44 14v10M44 24 26 34M44 24l18 10M26 34v8M62 34v8"/>
+        <rect class="s1" x="34" y="4"  width="20" height="12" rx="3"/>
+        <rect class="s2" x="16" y="42" width="20" height="12" rx="3"/>
+        <rect class="s2" x="52" y="42" width="20" height="12" rx="3"/>
+      </svg>
+      <h3>Seal the evidence</h3>
+      <p>Every field is serialised to one canonical byte sequence (RFC 8785), hashed into a
+         domain-separated leaf, and combined into a Merkle tree. One 32-byte root now stands
+         for the whole finding.</p>
+    </li>
+    <li class="reveal" style="--d:360ms">
+      <div class="fnum">5</div>
+      <svg class="fart" viewBox="0 0 88 64" aria-hidden="true">
+        <rect class="s1" x="14" y="14" width="26" height="16" rx="3"/>
+        <rect class="s1" x="14" y="34" width="26" height="16" rx="3"/>
+        <rect class="s1" x="48" y="24" width="26" height="16" rx="3"/>
+        <path class="s3 dash" d="M40 22h4a4 4 0 0 1 4 4v2M40 42h4a4 4 0 0 0 4-4v-2"/>
+      </svg>
+      <h3>Anchor on Sepolia</h3>
+      <p>Only the root is submitted. No image, no name, no post text, no embedding. What the
+         chain adds is the one thing you cannot fake locally: an independent witness that
+         this exact root existed at this exact time.</p>
+    </li>
+  </ol>
+
+
+  <div class="ex-head reveal" style="margin-top:78px">
+    <div class="eyebrow">Architecture</div>
+    <h2>One face in, four independent sources, one sealed record out</h2>
+    <p>Nothing here is a wrapper around a single API. Sources that fail in different ways
+       run at once, and every candidate any of them returns has to pass the same face gate.</p>
+  </div>
+
+  <div class="arch reveal">
+    <svg viewBox="0 0 1120 400" role="img"
+         aria-label="Sigil pipeline: face encoding, a concurrent fan-out across four search
+                     sources, a face gate, then a Merkle root anchored on Sepolia.">
+
+      <text class="lbl" x="0" y="14">1 · Encode</text>
+      <rect class="card-hi" x="0" y="28" width="176" height="104" rx="12"/>
+      <text class="box-t" x="16" y="56">Face engine</text>
+      <text class="box-s" x="16" y="78">SCRFD det_10g</text>
+      <text class="box-s" x="16" y="97">ArcFace w600k_r50</text>
+      <text class="box-s" x="16" y="116">512-d, stays in memory</text>
+
+      <text class="lbl" x="238" y="14">2 · Search, concurrently</text>
+
+      <rect class="card-bg" x="238" y="28" width="250" height="62" rx="10"/>
+      <rect x="238" y="28" width="5" height="62" rx="2.5" fill="#d67419"/>
+      <text class="chip-t" x="258" y="52">SerpApi · Google Lens</text>
+      <text class="chip-s" x="258" y="72">type=all: visual matches, pages, entity</text>
+
+      <rect class="card-bg" x="238" y="100" width="250" height="62" rx="10"/>
+      <rect x="238" y="100" width="5" height="62" rx="2.5" fill="#d67419"/>
+      <text class="chip-t" x="258" y="124">SerpApi · Web</text>
+      <text class="chip-s" x="258" y="144">the inferred name, site:-restricted</text>
+
+      <rect class="card-bg" x="238" y="172" width="250" height="62" rx="10"/>
+      <rect x="238" y="172" width="5" height="62" rx="2.5" fill="#5a66e9"/>
+      <text class="chip-t" x="258" y="196">Exa · neural retrieval</text>
+      <text class="chip-s" x="258" y="216">pages about a person, not keywords</text>
+
+      <rect class="card-bg" x="238" y="244" width="250" height="62" rx="10"/>
+      <rect x="238" y="244" width="5" height="62" rx="2.5" fill="#1d9a57"/>
+      <text class="chip-t" x="258" y="268">Wikidata · Commons</text>
+      <text class="chip-s" x="258" y="288">curated portraits, no key, no quota</text>
+
+      <rect class="card-bg" x="238" y="316" width="250" height="62" rx="10"/>
+      <rect x="238" y="316" width="5" height="62" rx="2.5" fill="#c07b12"/>
+      <text class="chip-t" x="258" y="340">Page harvest</text>
+      <text class="chip-s" x="258" y="360">every photo on a page, not just one</text>
+
+      <path class="wire flowing" d="M176 80 H207 V59 H238"/>
+      <path class="wire flowing" d="M207 80 V131 H238"/>
+      <path class="wire flowing" d="M207 80 V203 H238"/>
+      <path class="wire flowing" d="M207 80 V275 H238"/>
+      <path class="wire flowing" d="M207 80 V347 H238"/>
+
+      <path class="wire" d="M488 59  H520 V203"/>
+      <path class="wire" d="M488 131 H520"/>
+      <path class="wire" d="M488 203 H520"/>
+      <path class="wire" d="M488 275 H520 V203"/>
+      <path class="wire" d="M488 347 H520 V203"/>
+      <path class="wire-hi flowing" d="M520 203 H560"/>
+
+      <text class="lbl" x="560" y="14">3 · Decide</text>
+      <rect class="card-gate" x="560" y="150" width="196" height="106" rx="12"/>
+      <text class="box-t" x="576" y="178">Face gate</text>
+      <text class="box-s" x="576" y="200">every candidate fetched</text>
+      <text class="box-s" x="576" y="219">and compared, all faces</text>
+      <text class="box-s" x="576" y="238">match · non-match · unsure</text>
+
+      <rect x="576" y="272" width="164" height="26" rx="6" fill="#fdedec"/>
+      <text class="chip-s" x="588" y="289" fill="#e0453f">rank never grants identity</text>
+
+      <path class="wire-hi flowing" d="M756 203 H812"/>
+
+      <text class="lbl" x="812" y="14">4 · Seal</text>
+      <rect class="card-hi" x="812" y="120" width="176" height="76" rx="12"/>
+      <text class="box-t" x="828" y="148">Merkle root</text>
+      <text class="box-s" x="828" y="169">RFC 8785 canonical JSON</text>
+      <text class="box-s" x="828" y="187">per-field inclusion proofs</text>
+
+      <path class="wire-hi flowing" d="M900 196 V232"/>
+
+      <rect class="card-chain" x="812" y="232" width="176" height="82" rx="12"/>
+      <text class="chain-t" x="828" y="260">Sepolia</text>
+      <text class="chain-s" x="828" y="281">SigilRegistry.anchor()</text>
+      <text class="chain-s" x="828" y="299">32 bytes, nothing personal</text>
+
+      <path class="wire" d="M900 314 V344 H700"/>
+      <rect class="card-bg" x="524" y="330" width="176" height="62" rx="10"/>
+      <text class="chip-t" x="540" y="354">Re-verify</text>
+      <text class="chip-s" x="540" y="374">read-only eth_call, no wallet</text>
+
+      <rect x="0" y="330" width="176" height="62" rx="10" class="card-bg"/>
+      <text class="chip-t" x="16" y="354">Local face index</text>
+      <text class="chip-s" x="16" y="374">exact NN over what we hold</text>
+      <path class="wire" d="M88 330 V80" stroke-dasharray="4 5"/>
+    </svg>
+
+    <div class="arch-key">
+      <span><i style="background:#d67419"></i>SerpApi</span>
+      <span><i style="background:#5a66e9"></i>Exa</span>
+      <span><i style="background:#1d9a57"></i>No credential needed</span>
+      <span><i style="background:#c07b12"></i>Our own crawler</span>
+      <span><i style="background:#1a1836"></i>On-chain</span>
+    </div>
+  </div>
+
+  <!-- ══════════ THE CHAIN PART ══════════ -->
+  <div class="chain-ex">
+    <div class="ex-head reveal">
+      <div class="eyebrow">The blockchain part</div>
+      <h2>What actually goes on the chain</h2>
+      <p>Almost nothing, and that is the design. Try it: change a field and watch the root
+         move. The hashing below runs in your browser, right now, with the same
+         construction the pipeline uses.</p>
+    </div>
+
+    <div class="demo reveal">
+      <div class="dcol">
+        <div class="dlabel">Evidence fields</div>
+        <div class="fields" id="mkFields"></div>
+        <button class="btn btn-ghost" id="mkTamper" type="button">Change one character</button>
+        <button class="btn btn-ghost" id="mkReset" type="button">Reset</button>
+      </div>
+
+      <div class="dcol dtree">
+        <div class="dlabel">Merkle tree</div>
+        <svg class="tree" viewBox="0 0 300 150" aria-hidden="true">
+          <path class="tl" d="M150 34v14M150 48 90 66M150 48l60 18M90 80v14M90 94 56 110M90 94l34 16M210 80v14M210 94l-34 16M210 94l34 16"/>
+          <rect class="tn root" x="122" y="14" width="56" height="20" rx="5"/>
+          <rect class="tn" x="66"  y="60" width="48" height="20" rx="5"/>
+          <rect class="tn" x="186" y="60" width="48" height="20" rx="5"/>
+          <rect class="tn leaf" data-leaf="0" x="34"  y="108" width="44" height="18" rx="4"/>
+          <rect class="tn leaf" data-leaf="1" x="102" y="108" width="44" height="18" rx="4"/>
+          <rect class="tn leaf" data-leaf="2" x="154" y="108" width="44" height="18" rx="4"/>
+          <rect class="tn leaf" data-leaf="3" x="222" y="108" width="44" height="18" rx="4"/>
+        </svg>
+        <div class="dlabel">Root</div>
+        <div class="root mono" id="mkRoot">computing…</div>
+      </div>
+
+      <div class="dcol">
+        <div class="dlabel">On chain</div>
+        <div class="chip-card">
+          <div class="crow"><span>root</span><b class="mono" id="mkAnchored">…</b></div>
+          <div class="crow"><span>submitter</span><b class="mono">0xdBB0…E8DC</b></div>
+          <div class="crow"><span>anchored</span><b class="mono">block 11621561</b></div>
+          <div class="crow"><span>schema</span><b class="mono">v1</b></div>
+        </div>
+        <div class="verdictbox" id="mkVerdict"></div>
+      </div>
+    </div>
+
+    <div class="claims">
+      <div class="reveal" style="--d:0ms">
+        <h3>Nothing personal is stored</h3>
+        <p>The contract holds a hash, an address, a timestamp and a schema number. Biometric
+           data on an immutable public ledger is a permanent harm, so none is written.</p>
+      </div>
+      <div class="reveal" style="--d:90ms">
+        <h3>Checking needs no wallet</h3>
+        <p>Re-verification is a read-only <code>eth_call</code>. A proof that required the
+           claimant's private key would not be a proof.</p>
+      </div>
+      <div class="reveal" style="--d:180ms">
+        <h3>A change is named, not just noticed</h3>
+        <p>A single hash would only tell you something moved. Per-field inclusion proofs tell
+           you it was <code>post.canonical_url</code>.</p>
+      </div>
+    </div>
+  </div>
+
+
+</section>
+
+<!-- ══════════ RESULTS ══════════ -->
+<section class="res hidden" id="results">
+  <aside>
+    <div class="panel">
+      <img id="queryImg" alt="query face">
+      <div class="panelrow">
+        <button class="btn btn-orange" id="newSearch2">New search</button>
+        <button class="btn btn-ghost" id="openReport"
+                title="Every candidate, the Merkle root, the chain record and the timings">
+          Full report
+        </button>
+      </div>
+    </div>
+    <div class="prog hidden" id="prog">
+      <h4>Working</h4>
+      <div class="bar"><i></i></div>
+      <div class="steps" id="steps"></div>
+    </div>
+    <div id="verdict"></div>
+    <div class="dark hidden" id="proof"></div>
+    <div class="kv" id="kv"></div>
+    <div class="audit hidden" id="audit"></div>
+  </aside>
+
+  <main>
+    <div class="chips" id="chips"></div>
+    <div class="masonry" id="grid"></div>
+    <button class="btn btn-ghost hidden" id="more"></button>
+    <div class="nores hidden" id="empty"></div>
+  </main>
+</section>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
+  ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+
+const STAGES = ["Loading models","Detecting and encoding the face","Searching the live web",
+                "Fetching candidate media","Verifying identity",
+                "Looking for more posts of the same person",
+                "Building the evidence root","Rendering the report","Anchoring on-chain"];
+
+const PLATFORM = {
+  x:{c:"#0f1419",t:"X",n:"X"}, instagram:{c:"#d62976",t:"IG",n:"Instagram"},
+  facebook:{c:"#1877f2",t:"f",n:"Facebook"}, linkedin:{c:"#0a66c2",t:"in",n:"LinkedIn"},
+  tiktok:{c:"#010101",t:"TT",n:"TikTok"}, reddit:{c:"#ff4500",t:"r/",n:"Reddit"},
+  youtube:{c:"#ff0000",t:"▶",n:"YouTube"}, threads:{c:"#000",t:"@",n:"Threads"},
+  pinterest:{c:"#bd081c",t:"P",n:"Pinterest"},
+};
+const plat = p => PLATFORM[p] || {c:"#6c6c9c",t:"?",n:p||"unknown"};
+
+/* The site's own icon, as the search provider reported it. No third-party favicon
+   service is called: that would hand the entire result list to a company with no part
+   in the search. When the provider gave us none, the lettered tile is the fallback. */
+function favicon(c, P){
+  const letter = `<span class="favi" style="background:${P.c}">${esc(P.t)}</span>`;
+  if(!c.favicon_url) return letter;
+  return `<span class="favi img"><img src="${esc(c.favicon_url)}" alt="" loading="lazy"
+    onerror="this.closest('.favi').outerHTML=${JSON.stringify(letter).replace(/"/g,"&quot;")}"></span>`;
+}
+const MEDIA = { ORIGINAL:"full-resolution original", OPENGRAPH:"OpenGraph tag on the post page",
+                OEMBED:"oEmbed endpoint", THUMBNAIL:"search-provider thumbnail" };
+const prettyUrl = u => { try { const x=new URL(u);
+  const p = x.pathname.length>32 ? x.pathname.slice(0,31)+"…" : x.pathname;
+  return x.hostname.replace(/^www\./,"")+p; } catch { return u; } };
+
+let RUN = null, UPLOAD = null, RUNNING = false;
+// Candidates shown before "show more". Everything fetched is already verified and in
+// memory; this only decides how much of it is on screen at once.
+const PAGE_STEP = 12;
+let PAGE = PAGE_STEP;
+
+fetch("/api/benchmark").then(r=>r.json()).then(b=>{
+  if(!b || !b.roc_auc) return;
+  const cells=[["ROC-AUC", b.roc_auc.toFixed(3)],
+               ["EER", b.eer.toFixed(4)],
+               ["TAR at FMR 1e-3", b.tar_at_fmr_1e3.toFixed(3)],
+               ["false matches", `${b.false_matches} / ${b.test_negative}`],
+               ["detect p50", `${Math.round(b.detect_latency.p50_ms)} ms`],
+               ["embed p50", `${Math.round(b.embed_latency.p50_ms)} ms`]];
+  $("strip").innerHTML = cells.map(([k,v])=>
+    `<div><div class="v">${esc(v)}</div><div class="k">${esc(k)}</div></div>`).join("")
+    + `<div class="src">Measured by <code>sigil benchmark</code> on LFW, with thresholds
+       calibrated on a disjoint split. Not a marketing claim.</div>`;
+}).catch(()=>{});
+
+fetch("/api/config").then(r=>r.json()).then(c=>{
+  const missing=[];
+  if(!c.serpapi_configured) missing.push("SERPAPI_KEY not set");
+  if(!c.contract_address)   missing.push("CONTRACT_ADDRESS not set");
+  if(!missing.length) return;
+  const el=$("state");
+  el.classList.remove("hidden");
+  el.innerHTML=`<span class="dot warn"></span><span>${esc(missing.join(" · "))}</span>`;
+}).catch(()=>{});
+
+/* The scattered hero photos. Positions are fixed; the pictures come from
+   data/samples/, so adding a face to that folder adds a tile and a demo at once.
+   Slots are filled in order and the list repeats if there are more slots than faces. */
+// Slots are ordered by prominence and filled with *distinct* faces, never repeated:
+// the same person appearing twice on one page reads as a rendering bug, and it also
+// misrepresents how many demos are actually available. Extra slots go unused.
+// Portrait-leaning slots, because every sample is a portrait and a landscape slot has
+// to crop a face to fill it.
+const SCATTER = [
+  { side:"left",  x:"9%",    y:236, w:178, h:238 },
+  { side:"right", x:"9.5%",  y:272, w:178, h:232 },
+  { side:"left",  x:"1.5%",  y:74,  w:118, h:138 },
+  { side:"right", x:"1.5%",  y:66,  w:118, h:138 },
+  { side:"left",  x:"2.5%",  y:512, w:124, h:146 },
+  { side:"right", x:"2.5%",  y:548, w:124, h:146 },
+  { side:"left",  x:"13.5%", y:552, w:112, h:132 },
+  { side:"right", x:"14%",   y:88,  w:112, h:132 },
+  { side:"right", x:"3%",    y:388, w:104, h:120 },
+];
+
+const PILLS = [
+  { side:"left",  x:"13%",   y:60,  text:"verified" },
+  { side:"left",  x:"1.5%",  y:352, text:"rejected" },
+  { side:"right", x:"13.5%", y:56,  text:"on-chain" },
+  { side:"right", x:"1.5%",  y:360, text:"inconclusive" },
+];
+
+const MAG = `<span class="mag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+  stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle>
+  <path d="M20 20l-4.2-4.2"></path></svg></span>`;
+
+fetch("/api/samples").then(r=>r.json()).then(d=>{
+  const list=d.samples||[];
+  if(!list.length){
+    $("try").classList.remove("hidden");
+    $("samples").innerHTML=`<div class="samples-empty">Drop images into
+      <code>data/samples/</code> and they appear here as one-click demos.</div>`;
+    return;
+  }
+
+  const scatter=$("scatter");
+  const slots=SCATTER.slice(0, list.length);
+  scatter.innerHTML = slots.map((slot,i)=>{
+    const s=list[i];
+    const edge=slot.side==="left"?`left:${slot.x}`:`right:${slot.x}`;
+    return `<button class="tile-f" type="button" data-file="${esc(s.file)}"
+        data-url="${esc(s.url)}" title="Search ${esc(s.name)}"
+        aria-label="Search ${esc(s.name)}"
+        style="${edge}; top:${slot.y}px; width:${slot.w}px; height:${slot.h}px">
+        <img src="${esc(s.url)}" alt="" loading="lazy">${MAG}</button>`;
+  }).join("") + PILLS.map(pill=>{
+    const edge=pill.side==="left"?`left:${pill.x}`:`right:${pill.x}`;
+    return `<div class="pill-f" style="${edge}; top:${pill.y}px">${esc(pill.text)}</div>`;
+  }).join("");
+
+  scatter.querySelectorAll(".tile-f").forEach(el=>el.onclick=()=>{
+    // Hold the tint on the tile that was clicked, so the click is acknowledged
+    // before the results view takes over.
+    el.classList.add("busy");
+    runSample(el.dataset.file, el.dataset.url);
+  });
+}).catch(()=>{});
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Scroll reveal, and the live Merkle demonstration in the blockchain section.
+
+   The demo is not a mock-up. It hashes in your browser with the same construction
+   the pipeline uses, domain-separated leaves and promoted odd nodes, over four
+   illustrative fields. Changing a character really does move the root, and the
+   field that moved really is identified by recomputing its leaf.
+   ───────────────────────────────────────────────────────────────────────────── */
+document.documentElement.classList.add("js");
+
+const io = new IntersectionObserver((entries)=>{
+  entries.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add("in"); io.unobserve(e.target); } });
+}, { rootMargin:"0px 0px -8% 0px", threshold:.08 });
+document.querySelectorAll(".reveal").forEach(el=>io.observe(el));
+
+const MK_LEAF = "SIGIL:LEAF:v1:", MK_NODE = "SIGIL:NODE:v1:";
+const MK_ORIGINAL = [
+  ["post.canonical_url", "https://youtube.com/watch?v=UMhVED7d-lQ"],
+  ["post.platform",      "youtube"],
+  ["decision.distance",  "0.2594"],
+  ["model",              "buffalo_l:scrfd+arcface"],
+];
+let mkFields = MK_ORIGINAL.map(row=>row.slice());
+let mkChanged = -1;
+
+const mkEnc = new TextEncoder();
+const mkHex = b => [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("");
+const mkCat = (...parts) => {
+  const total = parts.reduce((n,p)=>n+p.length,0);
+  const out = new Uint8Array(total);
+  let at=0; for(const part of parts){ out.set(part,at); at+=part.length; }
+  return out;
+};
+const mkSha = async bytes => new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+
+async function mkLeaf(field, value){
+  return mkSha(mkCat(mkEnc.encode(MK_LEAF), mkEnc.encode(field),
+                     new Uint8Array([0]), mkEnc.encode(JSON.stringify(value))));
+}
+async function mkNode(left, right){
+  return mkSha(mkCat(mkEnc.encode(MK_NODE), left, right));
+}
+
+async function mkRender(){
+  const leaves = [];
+  for(const [field, value] of mkFields) leaves.push(await mkLeaf(field, value));
+  const mid = [await mkNode(leaves[0], leaves[1]), await mkNode(leaves[2], leaves[3])];
+  const root = "0x" + mkHex(await mkNode(mid[0], mid[1]));
+
+  const anchored = "0x" + mkHex(await mkNode(
+    await mkNode(await mkLeaf(...MK_ORIGINAL[0]), await mkLeaf(...MK_ORIGINAL[1])),
+    await mkNode(await mkLeaf(...MK_ORIGINAL[2]), await mkLeaf(...MK_ORIGINAL[3])),
+  ));
+  const intact = root === anchored;
+
+  $("mkFields").innerHTML = mkFields.map(([field, value], i)=>
+    `<div class="f ${i===mkChanged?"changed":""}"><k>${esc(field)}</k><v>${esc(value)}</v></div>`
+  ).join("");
+
+  $("mkRoot").textContent = root;
+  $("mkRoot").classList.toggle("hot", !intact);
+  $("mkAnchored").textContent = anchored.slice(0,10) + "…" + anchored.slice(-6);
+
+  document.querySelectorAll(".tree .tn").forEach(n=>n.classList.remove("hot"));
+  if(!intact){
+    document.querySelector(".tree .tn.root").classList.add("hot");
+    const leaf = document.querySelector(`.tree .tn.leaf[data-leaf="${mkChanged}"]`);
+    if(leaf) leaf.classList.add("hot");
+  }
+
+  const box = $("mkVerdict");
+  box.className = "verdictbox " + (intact ? "ok" : "bad");
+  box.innerHTML = intact
+    ? `<b>Evidence intact</b>The root computed here equals the root on chain, so every
+       field is exactly what was anchored.`
+    : `<b>Tampered: ${esc(mkFields[mkChanged][0])}</b>The root no longer matches the
+       anchored one, and recomputing each leaf identifies which field moved. A single
+       hash of the whole document could not have told you that.`;
+}
+
+$("mkTamper").onclick = ()=>{
+  mkChanged = 0;
+  const [field, value] = MK_ORIGINAL[0];
+  mkFields = MK_ORIGINAL.map(row=>row.slice());
+  mkFields[0] = [field, value.slice(0,-1) + (value.endsWith("Q") ? "R" : "Q")];
+  mkRender();
+};
+$("mkReset").onclick = ()=>{ mkChanged = -1; mkFields = MK_ORIGINAL.map(r=>r.slice()); mkRender(); };
+mkRender();
+
+/* upload */
+const drop=$("drop"), file=$("file");
+drop.onclick=()=>file.click();
+["dragenter","dragover"].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.add("over");}));
+["dragleave","drop"].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.remove("over");}));
+drop.addEventListener("drop",ev=>{const f=ev.dataTransfer.files[0]; if(f) submit(f);});
+file.onchange=ev=>{const f=ev.target.files[0]; if(f) submit(f);};
+window.addEventListener("paste",ev=>{
+  const i=[...(ev.clipboardData?.items||[])].find(x=>x.type.startsWith("image/"));
+  if(i) submit(i.getAsFile());
+});
+
+/* These were three checkboxes. They worked, and they were still wrong to show: two are
+   developer flags an end user should never have to reason about, and the third is a
+   disclosure the page already makes properly.
+
+   skip_chain  the chain record is the product; nobody using this wants it off
+   largest     only matters in a group photo, and the right default is obvious
+   no_cache    the audit panel labels every provider call LIVE or CACHED, so the honesty
+               this bought is already there without asking anyone to tick a box
+
+   All three remain flags on `sigil run`, which is where a developer flag belongs. */
+const query=()=>new URLSearchParams({
+  no_cache:"0", skip_chain:"0", largest:"1",
+  name: ($("nameHint")?.value || "").trim(),
+});
+
+async function submit(f){
+  const body=new FormData(); body.append("image",f,f.name||"upload.jpg");
+  UPLOAD=URL.createObjectURL(f);
+  await begin(fetch("/api/run?"+query(),{method:"POST",body}));
+}
+
+async function runSample(fileName,url){
+  UPLOAD=url;
+  const q=query(); q.set("file",fileName);
+  await begin(fetch("/api/run-sample?"+q,{method:"POST"}));
+}
+
+/* One screen for both states: the results layout appears immediately with the
+   query image and a skeleton grid, and fills in as stages complete. */
+async function begin(request){
+  RUNNING=true; RUN=null;
+  $("queryImg").src=UPLOAD||"";
+  renderShell(); show("results");
+  try{
+    const res=await request; const j=await res.json();
+    if(!res.ok) throw new Error(j.error||"run failed");
+    poll(j.run_id);
+  }catch(e){ RUNNING=false; show("landing"); alert("Could not start the run: "+e.message); }
+}
+
+function renderShell(){
+  $("prog").classList.remove("hidden"); steps("");
+  $("verdict").innerHTML=""; $("proof").classList.add("hidden");
+  $("kv").innerHTML=""; $("audit").classList.add("hidden");
+  $("chips").innerHTML=""; $("empty").classList.add("hidden");
+  // Enough placeholders to fill four columns, at the cap a real run returns. Eight of
+  // them left the right third of the grid empty for the whole search.
+  const heights=[210,150,240,180,200,165,225,190,175,235,160,205,195,145,250,170,215,185,230,155];
+  $("grid").innerHTML=heights
+    .map(h=>`<div class="card"><div class="shot skel" style="height:${h}px"></div></div>`).join("");
+}
+
+function steps(cur){
+  const at=STAGES.indexOf(cur);
+  $("steps").innerHTML=STAGES.map((s,i)=>{
+    const cls=at<0?"":i<at?"done":i===at?"now":"";
+    const m=cls==="done"?"✓":cls==="now"?"▸":"·";
+    return `<div class="${cls}"><span>${m}</span><span>${esc(s)}</span></div>`;}).join("");
+}
+
+function poll(id){
+  const tick=async()=>{
+    const s=await (await fetch("/api/run/"+id)).json();
+    steps(s.stage);
+    if(s.status==="done"){ RUNNING=false; RUN=s.result; render(); }
+    else if(s.status==="error"){ RUNNING=false; show("landing"); alert("Run failed: "+s.error); }
+    else setTimeout(tick,700);
+  }; tick();
+}
+
+function show(w){
+  const landing = w === "landing";
+  $("landing").classList.toggle("hidden", !landing);
+  // The explainer is landing content and sits *above* the results in the document, so
+  // leaving it visible put a screenful of "How it works" between the top of the page and
+  // the results of the search you just ran. It hides with the hero it belongs to.
+  $("how").classList.toggle("hidden", !landing);
+  $("results").classList.toggle("hidden", w !== "results");
+  $("newSearch").classList.toggle("hidden", landing);
+  window.scrollTo(0, 0);
+}
+const kind=s=>s==="MATCH"?"ok":s==="NON_MATCH"?"bad":"warn";
+const SW={all:"#d67419",MATCH:"#1d9a57",NON_MATCH:"#e0453f",INCONCLUSIVE:"#c07b12"};
+
+function render(){
+  const r=RUN, cs=r.candidates||[], sel=r.selected;
+  $("prog").classList.add("hidden");
+  const n={all:cs.length,MATCH:0,NON_MATCH:0,INCONCLUSIVE:0};
+  for(const c of cs) n[c.decision.status]=(n[c.decision.status]||0)+1;
+
+  if(sel){
+    $("verdict").innerHTML=`<div class="verdict ok"><div class="h">Verified match</div>
+      <p>Cosine distance <strong>${sel.decision.distance.toFixed(4)}</strong> against a threshold
+      of ${sel.decision.threshold}, a margin of ${sel.margin.toFixed(4)}.
+      ${n.MATCH} of ${cs.length} candidates passed the face gate.</p></div>`;
+  } else if(r.error_code==="SEARCH_EMPTY"){
+    $("verdict").innerHTML=`<div class="verdict warn"><div class="h">No social result found</div>
+      <p>The live search returned nothing on the allowed platforms. This face may not be
+      publicly indexed, and that is reported honestly rather than guessed.</p></div>`;
+  } else {
+    $("verdict").innerHTML=`<div class="verdict warn"><div class="h">No verified match</div>
+      <p>${esc(r.error_message||"Nothing passed the identity gate.")}</p></div>`;
+  }
+
+  if(r.evidence_root){
+    $("proof").classList.remove("hidden");
+    $("proof").innerHTML=`<h4>Evidence root</h4>
+      <p>A Merkle tree over every field of this result${r.receipt?", anchored on Sepolia":""}.
+         Checking it needs no wallet.</p>
+      <div class="root">${esc(r.evidence_root)}</div>
+      <button class="btn btn-indigo" id="ov">Verify independently</button>`;
+    // Hand the verifier the run id so it can load the bundle itself. Dragging a folder
+    // in still works and is the path for someone who was sent a bundle, but the person who
+    // just ran the search should not have to go find it on disk.
+    $("ov").onclick=()=>window.open(
+      `/verify?run=${encodeURIComponent(RUN.run_id)}`, "_blank");
+  } else $("proof").classList.add("hidden");
+
+  const t=r.timings_ms||{}, total=Object.values(t).reduce((a,b)=>a+b,0), b=r.search_budget||{};
+  const rows=[];
+  if(sel) rows.push(["Post",`<a href="${esc(sel.source_url)}" target="_blank" rel="noopener noreferrer">${esc(prettyUrl(sel.source_url))}</a>`]);
+  if(r.receipt){
+    rows.push(["Tx",`<a class="mono" href="${esc(r.receipt.explorer_url)}" target="_blank" rel="noopener noreferrer">${esc(r.receipt.transaction_hash.slice(0,20))}…</a>`]);
+    rows.push(["Block",String(r.receipt.block_number)]);
+  }
+  rows.push(["Time",`${(total/1000).toFixed(1)} s`]);
+  rows.push(["Searches",`${b.live_searches??0} live, ${b.cached_searches??0} cached`]);
+  $("kv").innerHTML=rows.map(([k,v])=>`<div><span>${esc(k)}</span><span>${v}</span></div>`).join("");
+
+  const examined = cs.length;
+  const rejected = examined - (n.MATCH || 0);
+  $("chips").innerHTML =
+    `<button class="chip on" data-f="MATCH">
+       <span class="sq" style="background:${SW.MATCH}"></span>Verified
+       <span class="n">${n.MATCH || 0}</span></button>` +
+    (rejected
+      ? `<span class="examined">${examined} candidates examined, ${rejected} did not pass
+           the face gate. Every one of them, with its distance and the reason, is in the
+           <a href="#" id="reportLink">full report</a>.</span>`
+      : "");
+  const link = $("reportLink");
+  if (link) link.onclick = ev => { ev.preventDefault(); openReport(); };
+
+  const shown=cs.filter(c=>c.decision.status==="MATCH");
+  const page=shown.slice(0, PAGE);
+  $("grid").innerHTML=page.map(c=>{
+    const s=c.decision.status,k=kind(s);
+    const d=c.decision.distance!=null?c.decision.distance.toFixed(4):"-";
+    const P=plat(c.platform), q=(c.media&&c.media.quality)||"";
+    // Thumbnails are written per candidate index, so the grid shows what was examined.
+    const thumb=`/media/${encodeURIComponent(RUN.run_id)}/media/thumbs/${c.index}.jpg`;
+    const shot=`<img src="${thumb}" alt="" loading="lazy"
+                     onerror="this.parentNode.innerHTML=this.parentNode.innerHTML.replace(/<img[^>]*>/,'<div class=&quot;noimg&quot;>media not retrievable</div>')">`;
+    const routes=(c.search_routes||[]).map(x=>`<span class="rt" title="${esc(x)}">${esc(x.split(":")[0])}</span>`).join("");
+    const mt=q?`<span class="rt media" title="Media came from the ${esc(MEDIA[q]||q)}">${esc(q.toLowerCase())}</span>`:"";
+    return `<div class="card">
+      <div class="shot">${shot}<span class="stamp ${k}">${esc(s)}</span><span class="d">d=${d}</span></div>
+      <div class="cmeta">
+        <div class="srow">${favicon(c, P)}
+          <span class="cplat">${esc(P.n)}</span>
+          <a class="copen" href="${esc(c.source_url)}" target="_blank" rel="noopener noreferrer">Open</a></div>
+        <a class="curl" href="${esc(c.source_url)}" target="_blank" rel="noopener noreferrer"
+           title="${esc(c.source_url)}">${esc(prettyUrl(c.source_url))}</a>
+        <div class="prov">${routes}${mt}</div>
+        <div class="why">${esc(c.decision.reason)}</div>
+      </div></div>`;
+  }).join("");
+
+  const more=shown.length-page.length;
+  $("more").classList.toggle("hidden", more<=0);
+  if(more>0) $("more").textContent=`Show ${more} more result${more===1?"":"s"}`;
+
+  const recs=r.search_records||[], srcs=r.sources||[];
+  if(recs.length || srcs.length){
+    $("audit").classList.remove("hidden");
+    // Sources that ran but returned nothing, or errored, are shown too. An empty result
+    // and a broken provider look identical from the outside and only one is an answer.
+    const sourceRows = srcs.map(x=>`
+      <div class="r"><span class="rn">${esc(String(x.source||"").split(":")[0])}</span>
+        <span class="ri">${x.error ? esc(x.error).slice(0,42)
+                                   : esc(String(x.candidates))+" found, "+Math.round(x.elapsed_ms)+" ms"}</span>
+        <span class="flag ${x.error?"off":"on"}">${x.error?"FAILED":"OK"}</span></div>`).join("");
+    const callRows = recs.map(x=>`
+      <div class="r"><span class="rn">${esc(String(x.route||"").split(":")[0])}</span>
+        <span class="ri" title="${esc(x.search_id||"")}">${esc(x.search_id||"none")}</span>
+        <span class="flag ${x.from_cache?"off":"on"}">${x.from_cache?"CACHED":"LIVE"}</span></div>`).join("");
+    $("audit").innerHTML=`<h4>Search audit</h4>
+      <p class="lede2">Every source consulted and every provider call behind these results.
+         Sources run concurrently, so the search takes as long as the slowest one rather
+         than the sum. Each ID is checkable against the provider's own dashboard.</p>`
+      + sourceRows + callRows;
+  } else $("audit").classList.add("hidden");
+
+  // "No candidates in this category" was copy for filter chips that no longer exist. With
+  // only verified results on screen, an empty grid IS the answer to the search, so it says
+  // what happened rather than sounding like a filter that needs changing.
+  $("empty").classList.toggle("hidden", shown.length > 0);
+  if(!shown.length){
+    const unsure = n.INCONCLUSIVE || 0;
+    $("empty").innerHTML = examined
+      ? `<h3>No verified match</h3>
+         <p>${examined} candidate${examined === 1 ? " was" : "s were"} found, fetched and
+            compared against this face. None passed the gate${unsure
+              ? `, and ${unsure} could not be decided on the media available` : ""}.
+            That is the result, not an error: nothing is promoted to fill the gap.</p>
+         <p>Every candidate, with its distance and the reason, is in the
+            <a href="#" id="emptyReport">full report</a>.</p>`
+      : `<h3>Nothing found</h3>
+         <p>The search returned no page carrying a checkable image of a face. This face may
+            not be publicly indexed, and that is reported rather than guessed at.</p>`;
+    const link = $("emptyReport");
+    if(link) link.onclick = ev => { ev.preventDefault(); openReport(); };
+  }
+  function openReport(){
+  window.open(`/media/${encodeURIComponent(RUN.run_id)}/report.html`, "_blank");
+}
+$("openReport").onclick=openReport;
+  show("results");
+}
+
+$("more").onclick=()=>{ PAGE+=PAGE_STEP; render(); };
+
+const reset=()=>{ if(RUNNING) return; RUN=null; PAGE=PAGE_STEP; show("landing"); };
+
+$("howLink").onclick=ev=>{
+  ev.preventDefault();
+  if($("how").classList.contains("hidden")) show("landing");
+  $("how").scrollIntoView({behavior:"smooth", block:"start"});
+};
+$("newSearch").onclick=reset; $("newSearch2").onclick=reset;
+</script>
+</body>
+</html>

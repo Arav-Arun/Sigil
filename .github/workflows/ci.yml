@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+  workflow_dispatch:
+
+# Live SerpApi and testnet calls are never made here: CI must not consume the
+# search quota or the faucet-funded wallet that the final demo depends on.
+env:
+  RUN_LIVE_TESTS: "0"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python, lint, types, tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --all-extras --group dev
+
+      - name: Lint
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Type-check
+        run: uv run mypy sigil
+
+      # The face and benchmark suites need ~280 MB of ONNX weights and the LFW
+      # dataset. Both skip cleanly when absent, so CI still covers the pure logic:
+      # canonicalization, Merkle proofs, tamper localization, URL handling, quota,
+      # caching, and the search client's retry and error-classification paths.
+      - name: Tests
+        run: uv run pytest --cov=sigil --cov-report=term-missing --cov-report=xml
+
+      - name: Enforce coverage on the evidence and chain adapters
+        run: |
+          uv run python - <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          tree = ET.parse("coverage.xml")
+          floors = {"sigil/evidence": 90.0, "sigil/search/normalize.py": 90.0}
+          rates: dict[str, tuple[int, int]] = {}
+          for cls in tree.iter("class"):
+              filename = cls.get("filename", "")
+              lines = cls.find("lines")
+              if lines is None:
+                  continue
+              total = len(lines.findall("line"))
+              covered = sum(1 for line in lines.findall("line") if line.get("hits") != "0")
+              for prefix in floors:
+                  if filename.startswith(prefix):
+                      c, t = rates.get(prefix, (0, 0))
+                      rates[prefix] = (c + covered, t + total)
+          failed = False
+          for prefix, floor in floors.items():
+              covered, total = rates.get(prefix, (0, 0))
+              if not total:
+                  print(f"! {prefix}: no coverage data")
+                  continue
+              pct = 100.0 * covered / total
+              status = "ok " if pct >= floor else "FAIL"
+              print(f"{status} {prefix}: {pct:.1f}% (floor {floor}%)")
+              failed |= pct < floor
+          sys.exit(1 if failed else 0)
+          PY
+
+  contracts:
+    name: Solidity, compile, test, audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Compile
+        run: npm run compile
+
+      - name: Test
+        run: npm test
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reject committed credentials and biometric artifacts
+        run: python3 scripts/secret_scan.py
