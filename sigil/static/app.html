@@ -166,6 +166,17 @@
   .tile-f.busy { pointer-events:none; }
   .tile-f.busy::after { opacity:.62; }
   .tile-f.busy .mag { opacity:1; }
+  /* The hero composition when there are no sample photographs to fill it. Real faces are
+     never committed to this repository, so a clone and the hosted preview both start with
+     none; drawing the tiles keeps the layout the design intends instead of a blank band. */
+  .tile-p { position:absolute; border-radius:8px; box-shadow:var(--shadow-sm);
+            border:1px solid var(--line); overflow:hidden; pointer-events:none;
+            display:grid; place-items:center;
+            background:linear-gradient(150deg,var(--lav-soft),var(--lav)); }
+  .tile-p:nth-child(3n)   { background:linear-gradient(150deg,#fdfaef,var(--cream)); }
+  .tile-p:nth-child(3n+2) { background:linear-gradient(150deg,#f7f7ff,#e6e7fb); }
+  .tile-p svg { width:38%; height:38%; color:var(--indigo); opacity:.26; }
+
   @media (max-width:1120px) { #scatter { display:none; } }
 
   /* Sample strip: the mobile form of the hero scatter. */
@@ -688,7 +699,16 @@ function enterStaticPreview(){
       weights, so it is not hosted. Clone the repo and run <code>sigil serve</code> to
       use it. <a href="/verify">Verify Evidence</a> is fully working here, and so is the
       fingerprint demo below.</div>`;
-  $("scatter").innerHTML = "";
+  // Keep the scattered tiles, without faces. SCATTER is declared later in this script,
+  // but this only runs from a settled promise, so it is initialised by then.
+  const glyph = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+    stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/>
+    <path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg>`;
+  $("scatter").innerHTML = SCATTER.map(s=>{
+    const edge = s.side === "left" ? `left:${s.x}` : `right:${s.x}`;
+    return `<div class="tile-p" style="${edge}; top:${s.y}px; width:${s.w}px;
+      height:${s.h}px">${glyph}</div>`;
+  }).join("");
   $("try").classList.add("hidden");
 }
 
