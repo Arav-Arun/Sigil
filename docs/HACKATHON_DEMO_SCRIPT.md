@@ -22,12 +22,10 @@ On the architecture diagram, change **“above match threshold”** to **“cosi
 > We also distinguish an exact copy of the uploaded photo from a genuinely different photo of the same person. Exact copies are labeled clearly and ranked below independently verified social posts.
 >
 > After verification, Sigil hashes the evidence into a Merkle root and writes that root to a smart contract on Sepolia. This means blockchain is part of the working pipeline: it records the final verified result so it can be checked later for tampering.
-
-**Return to the website, click How it works, and briefly scroll through the five stages. In the blockchain section, click Change one character and then Reset.**
-
-> The website also explains each stage. This small interactive example shows why we use a Merkle root. Changing one character in the evidence immediately creates a different fingerprint and marks it as tampered. Resetting the field restores the original verified root.
 >
-> Now we’ll return to Face Search and run the real pipeline.
+> Now, let’s see how it works.
+
+**End Speaker 1 after the four Excalidraw diagrams and switch to the live website.**
 
 ## Speaker 2 — Live demo and blockchain verification
 
