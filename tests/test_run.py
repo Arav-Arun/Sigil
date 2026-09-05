@@ -8,23 +8,7 @@ from PIL import Image
 from sigil.candidates import MediaQuality
 from sigil.config import ConfigurationError, Settings
 from sigil.models import FaceObservation, PipelineErrorCode
-from sigil.run import _harvest_entity, _person_name_from_label, run_pipeline
-
-
-def test_confirmed_query_photo_filename_can_seed_more_searches() -> None:
-    verified = MagicMock(
-        matched=True,
-        same_photo=True,
-        candidate=MagicMock(title="Go For Gold", image_url="https://example.com/gaurish.png"),
-        media=MagicMock(final_url="https://example.com/gaurish.png"),
-    )
-
-    assert _harvest_entity([verified]) == "Gaurish"
-
-
-def test_confirmed_page_image_label_can_seed_a_full_name_search() -> None:
-    assert _person_name_from_label(" Gaurish   Baliga ") == "Gaurish Baliga"
-    assert _person_name_from_label("Go For Gold") == ""
+from sigil.run import run_pipeline
 
 
 def test_run_pipeline_no_face(tmp_path: Path) -> None:

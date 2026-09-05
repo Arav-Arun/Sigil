@@ -318,3 +318,23 @@ def test_static_assets_exist_on_disk():
 
     static = Path(__file__).resolve().parent.parent / "sigil" / "static"
     assert (static / "app.html").is_file()
+
+
+def test_results_ui_separates_distinct_photos_from_source_image_reposts():
+    """A provider hint must not become a repeated exact-photo card badge."""
+
+    source = (Path(__file__).resolve().parent.parent / "sigil" / "static" / "app.html").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Only the submitted image was rediscovered" in source
+    assert 'Show ${plural(reposts.length,"source-image repost")}' in source
+    assert "EXACT PHOTO" not in source
+    # The credit is one sentence split across two links, so assert the rendered wording
+    # and both destinations rather than a single string that markup can break.
+    assert "Made by Team" in source
+    assert ">Deploy For Good</a>" in source
+    assert "https://aravarun.in" in source
+    assert ">Hacker House Goa</a>" in source
+    assert "https://hhgoa.com" in source
+    assert "Task 3</footer>" in source

@@ -31,6 +31,7 @@ from urllib.parse import urljoin, urlsplit
 
 import requests
 
+from sigil import __version__
 from sigil.models import SearchCandidate
 from sigil.search.normalize import (
     canonicalize_url,
@@ -42,7 +43,9 @@ from sigil.search.providers.base import ProviderResult
 
 logger = logging.getLogger(__name__)
 
-USER_AGENT = "Mozilla/5.0 (compatible; Sigil/0.3; +https://github.com/Arav-Arun/HHgoa-FaceID)"
+USER_AGENT = (
+    f"Mozilla/5.0 (compatible; Sigil/{__version__}; +https://github.com/Arav-Arun/HHgoa-FaceID)"
+)
 
 MAX_PAGE_BYTES = 3_000_000
 MAX_IMAGES_PER_PAGE = 24
@@ -73,9 +76,8 @@ def extract_images(
 ) -> list[tuple[str, str]]:
     """Pull plausible ``(image URL, label)`` pairs out of a page in stable order.
 
-    The label matters after a face match. A page can associate ``gaurish.png`` with the
-    alt text ``Gaurish Baliga``; that page-derived full name is a much stronger search
-    hint than the filename, while the face gate still decides every resulting match.
+    The label is retained for auditability. It often identifies the subject more clearly
+    than a filename, which helps a reviewer understand why an image was considered.
     """
 
     found: list[tuple[str, str]] = []

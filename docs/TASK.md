@@ -78,8 +78,11 @@ evidence bundle, or put on chain.
 > Use the face to search the web and find at least one real, matching social media post.
 > This should be a genuine search step, not a hardcoded result.
 
-Discovery fans out across five sources that fail in different ways, run concurrently, so
-the stage costs the slowest source rather than the sum:
+Discovery uses a bounded fan-out across four provider families plus a capped page harvest,
+all of which fail in different ways.
+The first Lens call seeds any inferred name; the crop, web, Exa, and Wikidata lookups then
+run concurrently where credentials and the per-run budget allow. The stage is bounded by
+the slowest active lookup rather than an unbounded crawl:
 
 | Source | What it is good at | Needs |
 |---|---|---|
@@ -104,9 +107,9 @@ nothing) and `SEARCH_UNAVAILABLE` (the provider failed) are kept distinct, and
 the three is ever dressed up as a success.
 
 **Search never decides identity.** Candidates are ranked only after they pass the face
-gate, so a result that came first in the search cannot be promoted past verification. On
-one run the expansion round surfaced a *different* Colin Powell's LinkedIn profile; it was
-rejected at distance 0.878.
+gate, so a result that came first in the search cannot be promoted past verification. A
+lookalike surfaced by the entity-pivot route is still rejected when its face distance is
+outside the calibrated gate.
 
 ---
 
@@ -122,7 +125,7 @@ rejected at distance 0.878.
 | Address | [`0xc92D2fDe2757b14e5EB6Aef849E41aBa1F395517`](https://sepolia.etherscan.io/address/0xc92D2fDe2757b14e5EB6Aef849E41aBa1F395517) |
 | Source verified | [Sourcify **exact match**](https://repo.sourcify.dev/11155111/0xc92D2fDe2757b14e5EB6Aef849E41aBa1F395517/) on creation *and* runtime bytecode |
 | Gas | under 80k per anchor, asserted in the contract test suite |
-| Tests | `test/SigilRegistry.test.ts` (9 tests), `tests/test_evidence.py` |
+| Tests | `tests/contracts/SigilRegistry.test.ts` (9 tests), `tests/test_evidence.py` |
 
 What is anchored is a **32-byte Merkle root** over the canonical evidence manifest.
 Fields are serialised with RFC 8785 (JSON Canonicalization Scheme) and hashed into
@@ -166,7 +169,7 @@ Exit codes are stable: `0` verified, `3` verification failed, `2` configuration 
 A failure can never render as a green pass; when the root is genuinely anchored but the
 bundle no longer matches it, the output says exactly that.
 
-`verify.html` re-implements the canonicalization and Merkle construction **in JavaScript**,
+`sigil/static/verify.html` re-implements the canonicalization and Merkle construction **in JavaScript**,
 opens from a `file://` URL with nothing installed, and reaches the same verdict. If two
 independent implementations agree, the format is what is being verified rather than one
 codebase's behaviour.
@@ -185,7 +188,6 @@ sigil verify    # re-verify a bundle, with or without the chain
 sigil anchor    # anchor a bundle built earlier
 sigil prove     # all four requirements, checked end to end
 sigil benchmark # measured accuracy, with denominators
-sigil index     # local face index: build, evaluate, search
 sigil preflight # environment checks before a demo
 ```
 
@@ -194,53 +196,6 @@ visually, not the product, and it **binds to localhost only** by design: publish
 face-search interface would let anyone submit anyone's face.
 
 ---
-
-## Beyond the brief: a local face index
-
-The brief does not ask for this. It exists because "why not just do what lenso.ai does"
-is the obvious question, and the honest answer needs the parts separated.
-
-A face-search engine is four things. Three of them are code, and they are built and
-measured here:
-
-| Part | Status |
-|---|---|
-| Embed a face | ArcFace, 512-d, already required by requirement 1 |
-| Store N embeddings | [`sigil/index.py`](../sigil/index.py) |
-| Nearest-neighbour search | one matrix multiply; embeddings are unit vectors, so cosine distance is a dot product |
-| **Crawl social media to fill it** | **not code** |
-
-Measured over LFW, leave-one-out, so a query never counts its own row as the answer:
-
-| Metric | Value |
-|---|---|
-| Vectors / identities | 2,000 / 934 |
-| Recall @ 1 | **0.9975** |
-| Recall @ 10 | 0.9975 |
-| Query latency | p50 **0.034 ms**, p95 0.044 ms |
-| Index size | 3.82 MB |
-| Detection coverage | 1.000 |
-
-Search is exact, not approximate: every query scores every vector, so there is no recall
-traded away for speed. At this size a matrix multiply beats building a graph; beyond roughly
-a million vectors an HNSW or IVF-PQ structure would earn its complexity.
-
-Two corpora ship, both defensible: `lfw`, a public research dataset, used to measure the
-index honestly rather than to demo it; and `runs`, faces this tool already fetched during
-its own searches, so a repeat query costs no API call.
-
-**What is deliberately absent is the crawl.** Filling an index at lenso.ai's scale means
-scraping Instagram, Facebook and LinkedIn, which breaks their terms, needs authentication
-bypass and rotating infrastructure, and builds a permanent biometric record of millions of
-people who were never asked. That is the decision that would raise recall on private
-individuals the most, and it is a decision rather than an engineering problem. The machine
-is built; what goes into it is left to whoever runs it.
-
-```bash
-sigil index build --corpus lfw --limit 2000
-sigil index eval  --corpus lfw
-sigil index search --image data/samples/public_figure.jpg
-```
 
 ---
 

@@ -23,6 +23,7 @@ from urllib.parse import quote
 
 import requests
 
+from sigil import __version__
 from sigil.models import SearchCandidate
 from sigil.search.providers.base import ProviderResult
 
@@ -32,7 +33,9 @@ WIKIDATA_API = "https://www.wikidata.org/w/api.php"
 COMMONS_API = "https://commons.wikimedia.org/w/api.php"
 
 # Wikidata's own guidance: identify the tool and a contact, or expect to be throttled.
-USER_AGENT = "Sigil/0.3 (face-evidence research tool; https://github.com/Arav-Arun/HHgoa-FaceID)"
+USER_AGENT = (
+    f"Sigil/{__version__} (face-evidence research tool; https://github.com/Arav-Arun/HHgoa-FaceID)"
+)
 
 # P18 is "image". P4862 and friends exist but P18 is the canonical portrait.
 IMAGE_PROPERTY = "P18"

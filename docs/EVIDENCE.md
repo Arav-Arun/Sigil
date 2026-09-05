@@ -12,7 +12,7 @@ This is the most important decision in the format.
 evidence:
 
 ```
-schema_version              1
+schema_version              2
 pipeline_version            "0.3.0"
 model                       "insightface/buffalo_l:scrfd_10g+arcface_w600k_r50"
 configuration_sha256        digest of the canonicalized settings that produced the result
@@ -32,6 +32,12 @@ decision.distance           cosine distance
 decision.threshold          the calibrated threshold applied
 decision.candidate_face_index
 decision.faces_detected
+corroboration.verified_matches      how many candidates passed the identity gate
+corroboration.distinct_photos       of those, how many are not the submitted image
+corroboration.source_image_reposts  of those, how many are
+corroboration.best_distance         the winning distance
+corroboration.runner_up_distance    the next verified photo, or null when there is none
+corroboration.media_sha256          sorted digests of every verified candidate's media
 ```
 
 **Outside the root**, real, useful, and excluded on purpose:
@@ -71,7 +77,7 @@ data/bundles/<run-id>/
 │   ├── annotated_input.jpg
 │   └── candidate.bin
 └── search/
-    └── R1_lens-exact-full.json …   sanitized provider responses
+    └── R1_lens-all-full.json …   sanitized provider responses
 ```
 
 `manifest.json` is stored in canonical form, so the bytes on disk hash to the root with
@@ -187,6 +193,19 @@ pass.
 ---
 
 ## Versioning
+
+### Why the whole verified set is committed, not just the winner
+
+One candidate that scraped past the threshold and three independent photographs that
+cleared it comfortably are very different claims, and a manifest recording only the
+selected result cannot tell them apart. `corroboration` puts the shape of the supporting
+evidence inside the root, so how strong the finding was is part of what got sealed and
+cannot be restated afterwards as stronger than it was.
+
+Reposts of the submitted image are counted separately from distinct photographs.
+Rediscovering your own pixels is provenance, not independent support, and folding it into
+the count would inflate precisely the number that exists to say how much independent
+support there is.
 
 `schema_version` is anchored alongside the root. A future format change increments it and
 changes the domain-separation prefixes, so v1 roots stay verifiable under v1 rules and

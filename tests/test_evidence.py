@@ -194,6 +194,7 @@ class TestBundle:
             media_url="https://pbs.twimg.com/media/x.jpg",
             discovered_at="2026-09-02T12:00:00+00:00",
             decision={"status": "MATCH", "distance": 0.28, "threshold": 0.6},
+            corroboration={"verified_matches": 2, "distinct_photos": 2, "media_sha256": []},
             configuration={"match_threshold": 0.6},
             model_id="insightface/buffalo_l",
             pipeline_version="0.3.0",

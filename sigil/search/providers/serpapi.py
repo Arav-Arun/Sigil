@@ -25,6 +25,7 @@ from typing import Any
 import requests
 from requests.adapters import HTTPAdapter
 
+from sigil import __version__
 from sigil.config import Settings, get_settings
 from sigil.imaging import encode_for_serpapi, load_validated_image, sha256_bytes
 from sigil.models import PipelineErrorCode
@@ -35,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 IMAGE_UPLOAD_ENDPOINT = "https://serpapi.com/image"
 SEARCH_ENDPOINT = "https://serpapi.com/search.json"
-USER_AGENT = "Sigil/0.3 (+https://github.com/Arav-Arun/HHgoa-FaceID)"
+USER_AGENT = f"Sigil/{__version__} (+https://github.com/Arav-Arun/HHgoa-FaceID)"
 
 # SerpApi invalidates uploaded images after ten minutes. Refresh a little early so a slow
 # run never fails on a boundary.

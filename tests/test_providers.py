@@ -123,7 +123,7 @@ class TestExaParsing:
     def test_survives_an_empty_image_links_list(self):
         # Regression: `.get("imageLinks", [None])[0]` raises IndexError when the key is
         # present but empty, which is what Exa returns for a page with no image. It took
-        # down the entire expansion round on its first result.
+        # down the entire provider response on its first result.
         payload = {"results": [{"url": "https://x.com/a/status/1", "extras": {"imageLinks": []}}]}
         assert self._provider()._to_candidates(payload, route="exa", discovered_at=NOW) == []
 

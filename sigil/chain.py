@@ -9,21 +9,30 @@ Two properties drive the design:
   falsely-positive "verified" is closed: chain ID is asserted before signing, the
   receipt status is checked, a timed-out transaction is persisted as pending rather than
   resubmitted, and an unknown root reads as absent rather than as a zero struct.
+* **The registry must be the registry.** Reading ``verify(root)`` from an address
+  someone handed us proves nothing on its own, because a contract with the same ABI can
+  answer ``true`` for every root. The deployment record commits to the runtime bytecode
+  digest, so verification compares it and turns "some contract said yes" into "the
+  contract this repository compiles to said yes".
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from sigil.config import ROOT_DIR, Settings, get_settings
 
+# web3 and its transitive types are an optional extra, imported lazily inside
+# ChainClient so that `import sigil.run` still works without the chain dependencies.
 if TYPE_CHECKING:
+    from eth_typing import HexStr
     from web3.types import TxParams
 from sigil.models import ChainReceipt, PipelineErrorCode
 
@@ -65,39 +74,29 @@ REGISTRY_ABI: list[dict[str, Any]] = [
     },
     {
         "type": "function",
-        "name": "isAnchored",
-        "stateMutability": "view",
-        "inputs": [{"name": "root", "type": "bytes32"}],
-        "outputs": [{"name": "", "type": "bool"}],
-    },
-    {
-        "type": "function",
         "name": "totalAnchored",
         "stateMutability": "view",
         "inputs": [],
         "outputs": [{"name": "", "type": "uint256"}],
     },
-    {
-        "type": "event",
-        "name": "Anchored",
-        "anonymous": False,
-        "inputs": [
-            {"name": "root", "type": "bytes32", "indexed": True},
-            {"name": "submitter", "type": "address", "indexed": True},
-            {"name": "anchoredAt", "type": "uint64", "indexed": False},
-            {"name": "schemaVersion", "type": "uint16", "indexed": False},
-        ],
-    },
 ]
 
 
 class ChainError(RuntimeError):
-    """A chain interaction failed. Carries a stable pipeline error code."""
+    """A chain interaction failed. Carries a stable pipeline error code.
 
-    def __init__(self, code: PipelineErrorCode, message: str) -> None:
+    ``transaction_hash`` is set only for ``CHAIN_PENDING``, where a transaction was
+    genuinely submitted but did not confirm in time. Carrying it is what lets the
+    caller record which transaction to resume instead of signing a second one.
+    """
+
+    def __init__(
+        self, code: PipelineErrorCode, message: str, *, transaction_hash: str = ""
+    ) -> None:
         super().__init__(f"{code}: {message}")
         self.code = code
         self.message = message
+        self.transaction_hash = transaction_hash
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +113,17 @@ class AnchorRecord:
     def explorer_url(self) -> str:
         base = EXPLORERS.get(self.chain_id)
         return f"{base}/address/{self.contract_address}" if base else ""
+
+
+def expected_runtime_sha256(chain_id: int = SEPOLIA_CHAIN_ID) -> str:
+    """SHA-256 of the runtime bytecode recorded when the registry was deployed.
+
+    This comes from the checked-in deployment record, not from Hardhat's build output,
+    so it is available in a clean clone with nothing compiled. Empty when no deployment
+    is recorded for the chain, which is the normal case for a local test node.
+    """
+
+    return str((load_deployment(chain_id) or {}).get("runtimeBytecodeSha256") or "").lower()
 
 
 def explorer_tx_url(chain_id: int, tx_hash: str) -> str:
@@ -201,6 +211,37 @@ class ChainClient:
 
         return "0x" + self._w3.eth.get_code(self.address).hex().removeprefix("0x").lower()
 
+    def registry_identity(self) -> tuple[str, str]:
+        """Is the code at this address the SigilRegistry this repository recorded?
+
+        Returns ``(status, detail)`` where status is one of:
+
+        ``verified``    the deployed runtime bytecode digest matches the deployment record
+        ``mismatch``    it does not; this address is some other contract
+        ``unrecorded``  no deployment is recorded for this chain, so there is nothing to
+                        compare against. A local test node lands here.
+
+        Only ``mismatch`` is a failure. Reporting ``unrecorded`` as a pass would be the
+        same mistake this whole module exists to avoid, so callers must render the three
+        states distinctly rather than folding the middle one into either edge.
+        """
+
+        expected = expected_runtime_sha256(self.chain_id)
+        if not expected:
+            return "unrecorded", f"no deployment recorded for chain {self.chain_id}"
+        actual = self.runtime_code_sha256()
+        if actual == expected:
+            return "verified", f"runtime bytecode matches the recorded registry ({actual[:12]}…)"
+        return "mismatch", (
+            f"the contract at {self.address} is not SigilRegistry: runtime bytecode "
+            f"digest {actual[:12]}… does not match the recorded {expected[:12]}…"
+        )
+
+    def runtime_code_sha256(self) -> str:
+        """SHA-256 of the raw runtime bytecode, matching what the deploy script records."""
+
+        return hashlib.sha256(self._w3.eth.get_code(self.address)).hexdigest()
+
     # -- write --------------------------------------------------------------------
 
     def anchor(
@@ -258,14 +299,39 @@ class ChainClient:
             tx_hex = "0x" + tx_hex
         logger.info("anchor transaction submitted: %s", tx_hex)
 
+        return self.await_transaction(tx_hex, raw, confirmations=confirmations, timeout=timeout)
+
+    def await_transaction(
+        self,
+        tx_hash: str,
+        root: str | bytes,
+        *,
+        confirmations: int = 1,
+        timeout: float = 180.0,
+    ) -> ChainReceipt:
+        """Wait for an already-submitted anchor transaction and build its receipt.
+
+        Shared by the first attempt and by the resume path, so a transaction recovered
+        from a timeout is finished by exactly the code that would have finished it the
+        first time. Resuming a known hash is the only safe recovery: re-signing would
+        risk a second transaction for a root that is about to land.
+        """
+
+        raw = _root_bytes(root)
+        tx_hex = tx_hash if tx_hash.startswith("0x") else "0x" + tx_hash
+
         try:
-            receipt = self._w3.eth.wait_for_transaction_receipt(tx_hash, timeout=timeout)
+            receipt = self._w3.eth.wait_for_transaction_receipt(
+                cast("HexStr", tx_hex), timeout=timeout
+            )
         except Exception as exc:
-            # The transaction may still confirm. Surfacing it as pending lets a later
-            # `sigil anchor --resume` finish without submitting a duplicate.
+            # The transaction may still confirm. Reporting it as pending, with the hash
+            # attached, lets the caller record it and let `sigil anchor --bundle` resume
+            # that exact transaction rather than signing a duplicate.
             raise ChainError(
                 PipelineErrorCode.CHAIN_PENDING,
                 f"transaction {tx_hex} did not confirm within {timeout}s: {exc}",
+                transaction_hash=tx_hex,
             ) from exc
 
         if receipt["status"] != 1:
@@ -281,6 +347,7 @@ class ChainClient:
                     raise ChainError(
                         PipelineErrorCode.CHAIN_PENDING,
                         f"transaction {tx_hex} has not reached {confirmations} confirmations",
+                        transaction_hash=tx_hex,
                     )
                 time.sleep(1)
 
@@ -297,7 +364,9 @@ class ChainClient:
             evidence_root="0x" + raw.hex(),
             transaction_hash=tx_hex,
             block_number=int(receipt["blockNumber"]),
-            submitter=sender,
+            # The submitter comes from the contract, not from the transaction we happen
+            # to be holding, so a resumed receipt names whoever the chain says anchored it.
+            submitter=record.submitter,
             anchored_at=record.anchored_at or datetime.now(UTC),
             gas_used=int(receipt["gasUsed"]),
             explorer_url=explorer_tx_url(self.chain_id, tx_hex),
@@ -334,8 +403,56 @@ def client_from_settings(
     )
 
 
+# A public Sepolia endpoint, so re-verification needs no account anywhere. Reading a
+# public ledger should not require a signup, and the whole claim of this project is that
+# a third party can check the proof without asking us for anything.
+PUBLIC_SEPOLIA_RPC = "https://ethereum-sepolia-rpc.publicnode.com"
+
+
+def resolve_registry(bundle: str | Path, settings: Settings) -> tuple[str, str, str]:
+    """Decide which registry to read for a bundle: ``(rpc_url, address, provenance)``.
+
+    Configuration wins, then the checked-in deployment record, then the bundle receipt.
+    That order matters: the committed deployment is a reviewable trust anchor, while a
+    receipt travels with the evidence, so a tampered receipt must not be able to redirect
+    an otherwise clean verifier to a contract of the attacker's choosing.
+    """
+
+    rpc_url = settings.sepolia_rpc_url.get_secret_value() or ""
+    contract = settings.contract_address or ""
+    if rpc_url and contract:
+        return rpc_url, contract, ""
+
+    notes: list[str] = []
+    if not contract:
+        contract = str((load_deployment(SEPOLIA_CHAIN_ID) or {}).get("address") or "")
+        if contract:
+            notes.append(f"using checked-in Sepolia registry {contract}")
+    if not contract:
+        receipt_path = Path(bundle) / "receipt.json"
+        try:
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            receipt = {}
+        contract = str(receipt.get("contract_address") or "")
+        if contract:
+            notes.append(f"registry {contract} read from the bundle receipt")
+    if not rpc_url:
+        rpc_url = PUBLIC_SEPOLIA_RPC
+        notes.append(f"using the public endpoint {PUBLIC_SEPOLIA_RPC}")
+
+    if not contract:
+        raise ChainError(
+            PipelineErrorCode.INVALID_CONFIGURATION,
+            "no registry address: set CONTRACT_ADDRESS, or verify a bundle whose "
+            "receipt.json names one",
+        )
+    return rpc_url, contract, ", ".join(notes)
+
+
 __all__ = [
     "EXPLORERS",
+    "PUBLIC_SEPOLIA_RPC",
     "REGISTRY_ABI",
     "SEPOLIA_CHAIN_ID",
     "AnchorRecord",
@@ -343,6 +460,8 @@ __all__ = [
     "ChainError",
     "client_from_settings",
     "deployment_path",
+    "expected_runtime_sha256",
     "explorer_tx_url",
     "load_deployment",
+    "resolve_registry",
 ]

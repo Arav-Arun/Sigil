@@ -157,6 +157,11 @@ class TestDiscoveryToEvidence:
                     "distance": selected.decision.distance,
                     "threshold": selected.decision.threshold,
                 },
+                corroboration={
+                    "verified_matches": len(ranked),
+                    "distinct_photos": len(ranked),
+                    "media_sha256": sorted(item.media.sha256 for item in ranked),
+                },
                 configuration={"match_threshold": selected.decision.threshold},
                 model_id="test-model",
                 pipeline_version="0.3.0",
@@ -192,6 +197,7 @@ class TestDiscoveryToEvidence:
             media_url=selected.media.final_url,
             discovered_at=selected.candidate.discovered_at.isoformat(),
             decision={"status": "MATCH", "distance": selected.decision.distance},
+            corroboration={"verified_matches": len(ranked), "distinct_photos": len(ranked)},
             configuration={},
             model_id="test-model",
             pipeline_version="0.3.0",
@@ -293,6 +299,58 @@ class TestChainRoundTrip:
         client.anchor(root, 1, key)
         with pytest.raises(ChainError, match="already anchored"):
             client.anchor(root, 1, key)
+
+    def test_a_known_transaction_can_be_resumed_without_signing_again(self, deployed):
+        """The recovery path for a confirmation timeout.
+
+        `anchor()` raising CHAIN_PENDING carries the transaction hash precisely so a
+        later `sigil anchor --bundle` can finish that transaction. Signing a second one
+        would risk two anchors and two fees for a root that was already landing.
+        """
+
+        from sigil.chain import ChainClient
+
+        address, key, chain_id = deployed
+        client = ChainClient(TEST_RPC, address, expected_chain_id=chain_id)
+        root = "0x" + "c3" * 32
+
+        first = client.anchor(root, 1, key)
+        # Resuming the same hash yields the same receipt, with no new transaction.
+        resumed = client.await_transaction(first.transaction_hash, root)
+        assert resumed.transaction_hash == first.transaction_hash
+        assert resumed.block_number == first.block_number
+        assert resumed.submitter.lower() == first.submitter.lower()
+        assert client.total_anchored() >= 1
+
+    def test_a_local_node_reports_the_registry_as_unrecorded_not_verified(self, deployed):
+        """No deployment record for this chain means nothing to compare against.
+
+        That is neither a pass nor a failure, and collapsing it into either is exactly
+        the class of mistake the three-state identity check exists to prevent.
+        """
+
+        from sigil.chain import ChainClient
+
+        address, _, chain_id = deployed
+        client = ChainClient(TEST_RPC, address, expected_chain_id=chain_id)
+        status, detail = client.registry_identity()
+        assert status == "unrecorded", detail
+        # The digest is still computable; there is simply no committed value for it.
+        assert len(client.runtime_code_sha256()) == 64
+
+    def test_a_contract_that_is_not_the_registry_is_a_mismatch(self, deployed, monkeypatch):
+        """A look-alike registry must not be able to produce a verified result."""
+
+        from sigil import chain as chain_module
+        from sigil.chain import ChainClient
+
+        address, _, chain_id = deployed
+        client = ChainClient(TEST_RPC, address, expected_chain_id=chain_id)
+        # Pretend this chain has a recorded deployment whose code is something else.
+        monkeypatch.setattr(chain_module, "expected_runtime_sha256", lambda _cid=0: "ab" * 32)
+        status, detail = client.registry_identity()
+        assert status == "mismatch"
+        assert "not SigilRegistry" in detail
 
     def test_wrong_chain_id_is_refused_before_signing(self, deployed):
         from sigil.chain import ChainClient, ChainError

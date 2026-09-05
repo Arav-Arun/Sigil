@@ -55,7 +55,7 @@ RETRY_MAX_DET_SIZE = 1280
 # soft one. Re-detecting on an upscaled copy buys sub-pixel landmarks, and the alignment
 # warp then samples a cleanly interpolated source instead of upsampling 4x by itself.
 #
-# Whether that actually helps is measured, not assumed: see sigil/bench_resolution.py.
+# The recovery path is covered by the face-resolution tests and bounded below.
 UPSCALE_TARGET_FACE_PX = 112  # the ArcFace input edge; below it the warp only upsamples
 MAX_RECOGNITION_UPSCALE = 4.0
 MAX_UPSCALED_PIXELS = 12_000_000  # refuse to inflate an already-large image
@@ -105,7 +105,7 @@ def model_pack_dir(pack: str = DEFAULT_PACK) -> Path:
     try:
         from insightface.utils import storage
     except ImportError as exc:  # pragma: no cover - dependency is declared
-        raise FaceEngineError("insightface is not installed; run `make setup`") from exc
+        raise FaceEngineError("insightface is not installed; run `uv sync --all-extras`") from exc
 
     logger.info("Downloading the %s model pack (~280 MB, one time)", pack)
     storage.ensure_available("models", pack)

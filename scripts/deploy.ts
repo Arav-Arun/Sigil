@@ -1,9 +1,9 @@
 /**
  * Deploy SigilRegistry and record the deployment as a machine-checkable fact.
  *
- * The record written here is not documentation. `scripts/check_deployment.py` and the
- * `test_deployment_record` test read it back and compare the on-chain runtime bytecode
- * against the compiled artifact, byte for byte. That check exists because a hand-written
+ * The record written here is not documentation. Before it is written, the runtime
+ * bytecode at the new address is compared byte for byte against the compiled artifact,
+ * and a mismatch aborts the deployment. That check exists because a hand-written
  * deployment record silently drifted once: an edit to a *comment* in the contract changed
  * solc's metadata hash, so the repository source no longer produced the deployed bytecode
  * while every file still claimed it did.

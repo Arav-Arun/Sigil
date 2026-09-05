@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sigil, AI face search with verifiable proof</title>
+<title>Sigil — Face search you can check</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -28,6 +28,7 @@
     --bad:#e0453f;  --bad-fill:#fdedec;
     --warn:#c07b12; --warn-fill:#fdf6e6;
 
+    --line:#e6e6f2;         /* hairline rules */
     --shadow-sm:0 2px 8px rgba(89,99,168,.16);
     --shadow-lg:0 4px 20px rgba(90,102,233,.20);
   }
@@ -42,6 +43,10 @@
   a { color:inherit; text-decoration:none; }
   button { font:inherit; cursor:pointer; border:none; background:none; color:inherit; }
   .hidden { display:none !important; }
+  .site-footer a { font-weight:700; color:inherit; text-decoration:none; }
+  .site-footer a:hover { color:var(--indigo); text-decoration:none; }
+  .site-footer { padding:28px 24px 36px; border-top:1px solid var(--line); background:var(--white);
+                 text-align:center; color:var(--purple-soft); font-size:13.5px; }
 
   /* ══════════ nav ══════════ */
   /* Three equal columns, so the centre group is centred on the viewport rather
@@ -60,9 +65,26 @@
   .navmid a:hover { color:var(--indigo); }
   .navmid a.on { color:var(--purple); border-bottom-color:var(--purple); }
   .navend { display:flex; align-items:center; gap:12px; justify-self:end; }
+  .brand span { display:inline; }
   .state { display:flex; align-items:center; gap:7px; font-size:14.5px; color:var(--purple-soft);
            white-space:nowrap; }
-  @media (max-width:900px) { .navmid { display:none; } }
+  /* Never hide the navigation on a phone: it is the only route to the verifier. The
+     links shrink, and the wordmark drops to its symbol, before anything disappears. */
+  @media (max-width:900px) {
+    nav { grid-template-columns:auto 1fr auto; padding:0 14px; gap:10px; }
+    .navmid { justify-self:end; gap:18px; }
+    .navmid a { font-size:14.5px; }
+    /* Only the button goes: the results panel carries its own "New search". The status
+       line stays, because it appears solely when something is actually broken. */
+    .navend .btn { display:none; }
+    .navend { gap:0; }
+    .state { font-size:13px; max-width:34vw; overflow:hidden; text-overflow:ellipsis; }
+  }
+  @media (max-width:560px) {
+    .brand span { display:none; }
+    .navmid { gap:14px; }
+    .navmid a { font-size:14px; }
+  }
   .dot { width:7px; height:7px; border-radius:50%; background:#c9c8dc; flex:0 0 7px; }
   .dot.on { background:var(--ok); }
   .dot.warn { background:var(--warn); }
@@ -113,6 +135,7 @@
   .try { margin-top:28px; }
   .try .cap { font-size:15px; color:var(--purple-mid); margin-bottom:12px; }
   .samples { display:flex; gap:12px; justify-content:center; flex-wrap:wrap; }
+  .samples:has(.samples-empty) { justify-content:center; }
   .samples-empty { font-size:14.5px; color:var(--purple-soft); background:var(--lav-soft);
                    border-radius:10px; padding:14px 18px; display:inline-block; }
   .samples-empty code { font-family:ui-monospace,Menlo,monospace; font-size:15px;
@@ -143,94 +166,57 @@
   .tile-f.busy { pointer-events:none; }
   .tile-f.busy::after { opacity:.62; }
   .tile-f.busy .mag { opacity:1; }
-  .pill-f { position:absolute; background:var(--lav); color:var(--purple); border-radius:100px;
-            padding:8px 12px; font-size:15px; font-weight:600; }
-  @media (max-width:1120px) { .tile-f, .pill-f { display:none; } }
+  @media (max-width:1120px) { #scatter { display:none; } }
 
-  /* ══════════ architecture diagram ══════════ */
-  .arch { max-width:1180px; margin:0 auto; background:var(--white); border:1px solid #e7e7f2;
-          border-radius:16px; padding:26px; box-shadow:var(--shadow-sm); }
-  .arch-flow { display:grid;
-               grid-template-columns:minmax(150px,.82fr) 34px minmax(270px,1.45fr) 34px
-                                     minmax(190px,1fr) 34px minmax(190px,1fr);
-               gap:10px; align-items:stretch; }
-  .arch-stage { min-width:0; border:1px solid #dedef0; border-radius:12px; padding:18px;
-                background:#fbfbff; overflow:hidden; }
-  .arch-step { margin-bottom:20px; color:var(--purple-soft); font-size:12px; font-weight:700;
-               letter-spacing:.06em; text-transform:uppercase; }
-  .arch-stage h3 { margin:0 0 9px; color:var(--ink); font-size:18px; line-height:1.25; }
-  .arch-stage p { margin:0; color:var(--purple-soft); font-size:14px; line-height:1.55;
-                  overflow-wrap:anywhere; }
-  .arch-stage p + p { margin-top:7px; }
-  .arch-note { margin-top:18px; padding-top:13px; border-top:1px solid #e5e5f1;
-               color:var(--purple); font-size:12.5px; font-weight:600; line-height:1.45; }
-  .arch-face { border-color:#aeb4ff; background:#f5f5ff; }
-  .arch-discover { padding:18px; }
-  .arch-sources { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
-  .arch-source { min-width:0; padding:12px 12px 12px 14px; border:1px solid #e0e0ee;
-                 border-left:4px solid var(--source); border-radius:8px; background:#fff; }
-  .arch-source strong { display:block; color:var(--purple); font-size:14px; line-height:1.25; }
-  .arch-source span { display:block; margin-top:4px; color:var(--purple-soft); font-size:12px;
-                      line-height:1.4; overflow-wrap:anywhere; }
-  .arch-gate { border-color:#65b989; background:#f2fbf6; }
-  .arch-outcomes { display:flex; flex-wrap:wrap; gap:6px 12px; margin-top:17px; color:#256846;
-                   font-size:12px; font-weight:700; text-transform:uppercase; }
-  .arch-outcomes span + span::before { content:"\00b7"; margin-right:12px; color:#91a999; }
-  .arch-seal { display:flex; flex-direction:column; }
-  .arch-chain { margin-top:18px; padding:14px; border-radius:9px; background:#1a1836; }
-  .arch-chain strong { display:block; color:#d2d4ff; font-size:15px; }
-  .arch-chain span { display:block; margin-top:6px; color:#aaa8ce; font-size:12.5px;
-                     line-height:1.45; }
-  .arch-verify { margin-top:auto; padding-top:14px; color:var(--purple-soft); font-size:12.5px;
-                 line-height:1.45; }
-  .arch-verify strong { display:block; margin-bottom:3px; color:var(--purple); }
-  .arch-arrow { min-width:0; display:flex; flex-direction:column; align-items:center;
-                justify-content:center; gap:5px; color:var(--indigo); }
-  .arch-arrow span { color:var(--purple-soft); font-size:10.5px; font-weight:600; }
-  .arch-arrow::after { content:"→"; font-size:24px; line-height:1; }
-  @media (max-width:980px) {
-    .arch-flow { grid-template-columns:1fr; }
-    .arch-arrow { min-height:34px; flex-direction:row; }
-    .arch-arrow::after { content:"↓"; }
-    .arch-step { margin-bottom:12px; }
-    .arch-verify { margin-top:18px; }
-  }
-  @media (max-width:520px) {
-    .arch { margin:0 -12px; padding:14px; border-radius:12px; }
-    .arch-stage { padding:15px; }
-    .arch-sources { grid-template-columns:1fr; }
-    .arch-outcomes span + span::before { display:none; }
-  }
+  /* Sample strip: the mobile form of the hero scatter. */
+  .try { display:none; margin-top:26px; }
+  .try .cap { font-size:14px; color:var(--purple-mid); margin-bottom:10px; }
+  @media (max-width:1120px) { .try:not(.hidden) { display:block; } }
+  .samples { display:flex; gap:10px; flex-wrap:nowrap; overflow-x:auto; padding-bottom:6px;
+             justify-content:flex-start; scrollbar-width:none; }
+  .samples::-webkit-scrollbar { display:none; }
+  .tile-s { flex:0 0 auto; width:78px; height:96px; border-radius:10px; overflow:hidden;
+            border:1px solid var(--line); background:var(--white); padding:0; cursor:pointer;
+            box-shadow:var(--shadow-sm); }
+  .tile-s img { display:block; width:100%; height:100%; object-fit:cover; }
+  .tile-s.busy { opacity:.55; pointer-events:none; }
 
-  /* ══════════ explainer ══════════ */
+  /* ══════════ how it works ══════════ */
   .explain { padding:16px 24px 90px; }
   .ex-head { max-width:660px; margin:0 auto 40px; text-align:center; }
   .eyebrow { display:inline-block; background:var(--lav); color:var(--indigo);
-             border-radius:100px; padding:5px 13px; font-size:14px; font-weight:700;
+             border-radius:100px; padding:5px 13px; font-size:13px; font-weight:700;
              letter-spacing:.04em; text-transform:uppercase; margin-bottom:14px; }
   .ex-head h2 { font-size:34px; line-height:1.22; letter-spacing:-.02em; color:var(--ink);
                 margin:0 0 12px; font-weight:700; }
   .ex-head p { margin:0; font-size:16px; color:var(--purple-soft); line-height:1.6; }
 
-  .flow { max-width:1120px; margin:0 auto; padding:0; list-style:none;
-          display:grid; gap:18px; grid-template-columns:repeat(auto-fit,minmax(206px,1fr)); }
-  .flow li { position:relative; background:var(--white); border-radius:14px; padding:22px 20px 20px;
-             box-shadow:var(--shadow-sm); }
-  .fnum { position:absolute; top:-11px; left:20px; width:24px; height:24px; border-radius:50%;
-          background:var(--indigo); color:#fff; font-size:14px; font-weight:700;
-          display:grid; place-items:center; }
-  .fart { width:88px; height:64px; display:block; margin:6px 0 12px; overflow:visible; }
-  .fart .s1 { fill:var(--lav-soft); stroke:var(--indigo); stroke-width:2; }
-  .fart .s2 { fill:none; stroke:var(--indigo); stroke-width:2; stroke-linecap:round; }
-  .fart .s3 { fill:none; stroke:var(--gold); stroke-width:2; stroke-linecap:round; }
-  .fart .dash { stroke-dasharray:5 5; animation:march 1.4s linear infinite; }
-  .fart .orbit { stroke-dasharray:54; stroke-dashoffset:54; animation:sweep 2.6s ease-in-out infinite; }
-  .fart .pulse { animation:beat 2s ease-in-out infinite; transform-origin:38px 30px; }
-  @keyframes march { to { stroke-dashoffset:-20; } }
-  @keyframes sweep { 0% { stroke-dashoffset:54; } 55%,100% { stroke-dashoffset:0; } }
-  @keyframes beat { 0%,100% { transform:scale(1); opacity:.85; } 50% { transform:scale(1.35); opacity:.35; } }
-  .flow h3 { margin:0 0 6px; font-size:16px; font-weight:700; color:var(--ink); }
-  .flow p { margin:0; font-size:15px; line-height:1.6; color:var(--purple-soft); }
+  /* One step per row. Five narrow columns gave ~20 characters a line, which is why the
+     old explainer was hard to read; a single column keeps the measure near 60. */
+  .how { max-width:880px; margin:0 auto; padding:0; list-style:none; display:grid; gap:14px; }
+  .how li { display:grid; grid-template-columns:36px 1fr; gap:22px; background:var(--white);
+              border:1px solid var(--line); border-radius:14px; padding:24px 26px;
+              box-shadow:var(--shadow-sm); }
+  .snum { width:32px; height:32px; border-radius:50%; background:var(--lav); color:var(--indigo);
+          font-size:15px; font-weight:700; display:grid; place-items:center; }
+  .how h3 { margin:0 0 7px; font-size:18px; font-weight:700; color:var(--ink); }
+  .how p { margin:0; font-size:15.5px; line-height:1.65; color:var(--purple-soft);
+             max-width:62ch; }
+  .tags { display:flex; flex-wrap:wrap; gap:8px; margin-top:15px; }
+  .tag { border:1px solid var(--line); border-left:3px solid var(--source,var(--indigo));
+         border-radius:7px; padding:7px 12px; background:var(--lav-soft); font-size:13px; }
+  .tag b { display:block; color:var(--purple); font-weight:700; }
+  .tag span { display:block; margin-top:2px; color:var(--purple-soft); font-size:12px; }
+  .outcomes { display:flex; flex-wrap:wrap; gap:8px; margin-top:15px; }
+  .outcomes span { border-radius:6px; padding:5px 10px; font-size:12.5px; font-weight:700; }
+  .outcomes .m { background:var(--ok-fill); color:var(--ok); }
+  .outcomes .u { background:var(--warn-fill); color:var(--warn); }
+  .outcomes .n { background:var(--bad-fill); color:var(--bad); }
+  .note { margin-top:15px; padding-top:14px; border-top:1px solid var(--line);
+          font-size:13.5px; font-weight:600; color:var(--purple); line-height:1.5; }
+  @media (max-width:560px) {
+    .how li { grid-template-columns:1fr; gap:12px; padding:20px; }
+  }
 
   .chain-ex { margin-top:86px; }
   .demo { max-width:1120px; margin:0 auto; background:var(--white); border-radius:16px;
@@ -290,7 +276,6 @@
                    transition:opacity .55s ease var(--d,0ms), transform .55s cubic-bezier(.2,.7,.3,1) var(--d,0ms); }
   @media (prefers-reduced-motion:reduce) {
     .js .reveal { opacity:1; transform:none; }
-    .fart .dash, .fart .orbit, .fart .pulse { animation:none; }
   }
 
   /* Progress lives inside the results layout, so a run never swaps the whole
@@ -386,12 +371,6 @@
   @keyframes shimmer { to { background-position:-220% 0; } }
   .noimg { display:flex; align-items:center; justify-content:center; height:158px;
            color:#b3b2ca; font-size:14px; font-weight:500; background:var(--lav-soft); }
-  .stamp { position:absolute; left:10px; top:10px; display:inline-flex; align-items:center;
-           padding:4px 11px; border-radius:100px; font-size:14.5px; font-weight:700;
-           letter-spacing:.03em; color:#fff; backdrop-filter:blur(10px); }
-  .stamp.ok{background:rgba(29,154,87,.94)} .stamp.bad{background:rgba(224,69,63,.94)}
-  .stamp.warn{background:rgba(192,123,18,.94)}
-  .stamp.exact{background:rgba(214,116,25,.94)}
   .d { position:absolute; right:10px; bottom:10px; padding:4px 9px; border-radius:6px;
        background:rgba(28,30,37,.82); color:#fff; font-size:13.5px; backdrop-filter:blur(10px);
        font-family:ui-monospace,Menlo,monospace; }
@@ -413,6 +392,7 @@
   .rt { font-size:13px; font-weight:600; padding:3px 8px; border-radius:100px;
         background:var(--lav); color:var(--purple-mid); }
   .rt.media { background:#e6f0fb; color:#0a6bb5; }
+  .rt.duplicate { background:var(--warn-fill); color:#9a6610; }
   .why { font-size:15px; color:var(--purple-soft); margin-top:8px; line-height:1.5; }
   .nores { text-align:center; padding:60px 24px; color:var(--purple-soft);
            max-width:56ch; margin:0 auto; }
@@ -432,7 +412,7 @@
       <path d="M12 2.8v3.4M12 17.8v3.4M2.8 12h3.4M17.8 12h3.4"
             stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
     </svg>
-    Sigil
+    <span>Sigil</span>
   </a>
   <div class="navmid">
     <a class="on" href="/">Face Search</a>
@@ -454,8 +434,9 @@
   <div id="scatter"></div>
 
   <div class="hero-in">
-    <h1>AI Face Search<br>with <em>proof</em></h1>
-    <p class="lede">Find the post, verify the face, and seal the evidence on-chain.</p>
+    <h1>Face search<br>you can <em>check</em></h1>
+    <p class="lede">Find where a face appears online, confirm it is really the same person,
+       and get a record that proves the result was not edited afterwards.</p>
 
     <div class="searchcard">
       <div class="dz" id="drop">
@@ -473,6 +454,7 @@
     </div>
 
     <div class="try hidden" id="try">
+      <div class="cap">Or try one of these</div>
       <div class="samples" id="samples"></div>
     </div>
   </div>
@@ -482,148 +464,63 @@
 <section class="explain" id="how">
   <div class="ex-head reveal">
     <div class="eyebrow">How it works</div>
-    <h2>From a face to a proof</h2>
-    <p>Five stages. Each one is inspectable, and the two that decide anything, the face
-       comparison and the hash, are the two you can re-run yourself.</p>
+    <h2>From a photo to a proof</h2>
+    <p>Four steps. Searching only decides where to look, the face comparison decides who
+       it is, and the result is sealed so anyone can check later that it was not changed.</p>
   </div>
 
-  <ol class="flow">
+  <ol class="how">
     <li class="reveal" style="--d:0ms">
-      <div class="fnum">1</div>
-      <svg class="fart" viewBox="0 0 88 64" aria-hidden="true">
-        <rect class="s1" x="20" y="8" width="48" height="48" rx="8"/>
-        <circle class="s2" cx="44" cy="28" r="9"/>
-        <path class="s2" d="M29 50c3-8 9-11 15-11s12 3 15 11"/>
-        <path class="s3 dash" d="M8 12h10M8 52h10M70 12h10M70 52h10"/>
-      </svg>
-      <h3>Detect and encode</h3>
-      <p>SCRFD finds the face, five landmarks align it, and ArcFace turns it into 512
-         numbers. Those numbers are biometric data: they stay in memory, and are never
-         logged, never written to the evidence, never put on a chain.</p>
+      <div class="snum">1</div>
+      <div>
+        <h3>Read the face</h3>
+        <p>Your photo is scanned for faces, and each one is turned into a list of numbers
+           that describes it. Those numbers are biometric data, so they stay in memory:
+           never saved to disk, never written into the record, never put on a blockchain.</p>
+      </div>
     </li>
-    <li class="reveal" style="--d:90ms">
-      <div class="fnum">2</div>
-      <svg class="fart" viewBox="0 0 88 64" aria-hidden="true">
-        <circle class="s1" cx="38" cy="30" r="17"/>
-        <path class="s2" d="M50 42 68 58"/>
-        <path class="s3 orbit" d="M38 13a17 17 0 0 1 0 34"/>
-        <circle class="s2 pulse" cx="38" cy="30" r="4"/>
-      </svg>
-      <h3>Search the live web</h3>
-      <p>One Google Lens call returns visual matches, the pages that discuss the image, and
-         the name it inferred. If that comes back thin, a second wave pivots on the name
-         across social platforms and re-queries a head-and-shoulders crop.</p>
+    <li class="reveal" style="--d:80ms">
+      <div class="snum">2</div>
+      <div>
+        <h3>Search the open web</h3>
+        <p>Four independent sources are searched at once, so one of them failing or coming
+           back empty does not end the search. This step only suggests pages worth
+           checking. It never decides who anyone is.</p>
+        <div class="tags">
+          <div class="tag" style="--source:#d67419"><b>Google Lens</b><span>Visual matches and pages</span></div>
+          <div class="tag" style="--source:#5a66e9"><b>Exa</b><span>Related public pages</span></div>
+          <div class="tag" style="--source:#1d9a57"><b>Wikidata</b><span>Curated public portraits</span></div>
+          <div class="tag" style="--source:#c07b12"><b>Page crawler</b><span>Other photos on a page</span></div>
+        </div>
+      </div>
     </li>
-    <li class="reveal" style="--d:180ms">
-      <div class="fnum">3</div>
-      <svg class="fart" viewBox="0 0 88 64" aria-hidden="true">
-        <rect class="s1" x="6"  y="16" width="30" height="32" rx="6"/>
-        <rect class="s1" x="52" y="16" width="30" height="32" rx="6"/>
-        <circle class="s2" cx="21" cy="30" r="6"/>
-        <circle class="s2" cx="67" cy="30" r="6"/>
-        <path class="s3 dash" d="M38 32h12"/>
-      </svg>
-      <h3>Fetch and compare</h3>
-      <p>Every candidate's image is downloaded and every face in it is compared against
-         yours. The decision is a calibrated distance, so a result that ranked first in the
-         search cannot be promoted past the face check.</p>
+    <li class="reveal" style="--d:160ms">
+      <div class="snum">3</div>
+      <div>
+        <h3>Compare every result</h3>
+        <p>Each result's image is downloaded and every face in it is compared with yours.
+           A small or blurry image has to clear a tighter bar than a sharp one, because it
+           carries less to go on. A result that came first in the search is still rejected
+           if the face does not match.</p>
+        <div class="outcomes">
+          <span class="m">Match</span><span class="u">Not sure</span><span class="n">No match</span>
+        </div>
+        <div class="note">When the evidence is genuinely borderline, the answer is
+           “not sure”. Naming the wrong person is worse than admitting uncertainty.</div>
+      </div>
     </li>
-    <li class="reveal" style="--d:270ms">
-      <div class="fnum">4</div>
-      <svg class="fart" viewBox="0 0 88 64" aria-hidden="true">
-        <path class="s3" d="M44 14v10M44 24 26 34M44 24l18 10M26 34v8M62 34v8"/>
-        <rect class="s1" x="34" y="4"  width="20" height="12" rx="3"/>
-        <rect class="s2" x="16" y="42" width="20" height="12" rx="3"/>
-        <rect class="s2" x="52" y="42" width="20" height="12" rx="3"/>
-      </svg>
-      <h3>Seal the evidence</h3>
-      <p>Every field is serialised to one canonical byte sequence (RFC 8785), hashed into a
-         domain-separated leaf, and combined into a Merkle tree. One 32-byte root now stands
-         for the whole finding.</p>
-    </li>
-    <li class="reveal" style="--d:360ms">
-      <div class="fnum">5</div>
-      <svg class="fart" viewBox="0 0 88 64" aria-hidden="true">
-        <rect class="s1" x="14" y="14" width="26" height="16" rx="3"/>
-        <rect class="s1" x="14" y="34" width="26" height="16" rx="3"/>
-        <rect class="s1" x="48" y="24" width="26" height="16" rx="3"/>
-        <path class="s3 dash" d="M40 22h4a4 4 0 0 1 4 4v2M40 42h4a4 4 0 0 0 4-4v-2"/>
-      </svg>
-      <h3>Anchor on Sepolia</h3>
-      <p>Only the root is submitted. No image, no name, no post text, no embedding. What the
-         chain adds is the one thing you cannot fake locally: an independent witness that
-         this exact root existed at this exact time.</p>
+    <li class="reveal" style="--d:240ms">
+      <div class="snum">4</div>
+      <div>
+        <h3>Record the proof</h3>
+        <p>Every detail of the verified result is combined into one short fingerprint and
+           written to the Ethereum Sepolia blockchain. Only that fingerprint and a
+           timestamp go on chain: no photo, no name, no face data. Checking it later needs
+           no wallet and no account, and if anything was altered the check names the exact
+           detail that changed.</p>
+      </div>
     </li>
   </ol>
-
-
-  <div class="ex-head reveal" style="margin-top:78px">
-    <div class="eyebrow">Architecture</div>
-    <h2>From face scan to a verifiable record</h2>
-    <p>Four discovery sources broaden the search. Face comparison remains the only identity
-       gate, and the final fingerprint can be checked against the public chain.</p>
-  </div>
-
-  <div class="arch reveal">
-    <div class="arch-flow" role="img"
-         aria-label="A face scan is searched across four sources. Every candidate passes
-                     face comparison before an evidence fingerprint is recorded on Sepolia.">
-      <section class="arch-stage arch-face">
-        <div class="arch-step">01 / Prepare face</div>
-        <h3>Face scan</h3>
-        <p>Detect and align the face.</p>
-        <p>Build a comparison signature.</p>
-        <div class="arch-note">The signature stays in memory and is never put on chain.</div>
-      </section>
-
-      <div class="arch-arrow" aria-hidden="true"><span>face</span></div>
-
-      <section class="arch-stage arch-discover">
-        <div class="arch-step">02 / Discover</div>
-        <div class="arch-sources">
-          <div class="arch-source" style="--source:#d67419">
-            <strong>SerpApi</strong><span>Lens and web results</span>
-          </div>
-          <div class="arch-source" style="--source:#5a66e9">
-            <strong>Exa</strong><span>Related public pages</span>
-          </div>
-          <div class="arch-source" style="--source:#1d9a57">
-            <strong>Wikidata</strong><span>Curated public portraits</span>
-          </div>
-          <div class="arch-source" style="--source:#c07b12">
-            <strong>Page crawler</strong><span>Additional page photos</span>
-          </div>
-        </div>
-        <div class="arch-note">Sources run independently, so one failure does not stop the search.</div>
-      </section>
-
-      <div class="arch-arrow" aria-hidden="true"><span>candidates</span></div>
-
-      <section class="arch-stage arch-gate">
-        <div class="arch-step">03 / Verify identity</div>
-        <h3>Fetch and compare</h3>
-        <p>Download candidate media and compare every detected face with the input.</p>
-        <div class="arch-outcomes"><span>Match</span><span>Unsure</span><span>No match</span></div>
-        <div class="arch-note">Search rank never decides identity.</div>
-      </section>
-
-      <div class="arch-arrow" aria-hidden="true"><span>match</span></div>
-
-      <section class="arch-stage arch-seal">
-        <div class="arch-step">04 / Seal and record</div>
-        <h3>Evidence fingerprint</h3>
-        <p>Binds the post and comparison details, while preserving which detail changed.</p>
-        <div class="arch-chain">
-          <strong>Sepolia record</strong>
-          <span>Fingerprint and timestamp only. No photo or face signature.</span>
-        </div>
-        <div class="arch-verify">
-          <strong>Independent verification</strong>
-          Compare saved evidence with the public record. No wallet is required.
-        </div>
-      </section>
-    </div>
-  </div>
 
   <!-- ══════════ THE CHAIN PART ══════════ -->
   <div class="chain-ex">
@@ -643,7 +540,7 @@
         <button class="btn btn-ghost" id="mkReset" type="button">Reset</button>
       </div>
 
-      <div class="dcol dtree">
+      <div class="dcol">
         <div class="dlabel">How the fingerprint is built</div>
         <svg class="tree" viewBox="0 0 300 150" aria-hidden="true">
           <path class="tl" d="M150 34v14M150 48 90 66M150 48l60 18M90 80v14M90 94 56 110M90 94l34 16M210 80v14M210 94l-34 16M210 94l34 16"/>
@@ -725,6 +622,8 @@
   </main>
 </section>
 
+<footer class="site-footer">Made by Team <a href="https://aravarun.in" target="_blank" rel="noopener noreferrer">Deploy For Good</a> for <a href="https://hhgoa.com" target="_blank" rel="noopener noreferrer">Hacker House Goa</a> Task 3</footer>
+
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
@@ -733,7 +632,6 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
 
 const STAGES = ["Loading models","Detecting and encoding the face","Searching the live web",
                 "Fetching candidate media","Verifying identity",
-                "Looking for more posts of the same person",
                 "Building the evidence root","Rendering the report","Anchoring on-chain"];
 
 const PLATFORM = {
@@ -765,6 +663,10 @@ let RUN = null, UPLOAD = null, RUNNING = false;
 // memory; this only decides how much of it is on screen at once.
 const PAGE_STEP = 12;
 let PAGE = PAGE_STEP;
+// Reposts are proof of where the submitted image appeared, but they are not new visual
+// evidence. Keep them out of the first scan when distinct photos exist; a person can
+// reveal them deliberately without losing anything from the evidence trail.
+let SHOW_REPOSTS = false;
 
 
 fetch("/api/config").then(r=>r.json()).then(c=>{
@@ -797,13 +699,6 @@ const SCATTER = [
   { side:"right", x:"3%",    y:388, w:104, h:120 },
 ];
 
-const PILLS = [
-  { side:"left",  x:"13%",   y:60,  text:"verified" },
-  { side:"left",  x:"1.5%",  y:352, text:"rejected" },
-  { side:"right", x:"13.5%", y:56,  text:"on-chain" },
-  { side:"right", x:"1.5%",  y:360, text:"inconclusive" },
-];
-
 const MAG = `<span class="mag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
   stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle>
   <path d="M20 20l-4.2-4.2"></path></svg></span>`;
@@ -827,10 +722,19 @@ fetch("/api/samples").then(r=>r.json()).then(d=>{
         aria-label="Search ${esc(s.name)}"
         style="${edge}; top:${slot.y}px; width:${slot.w}px; height:${slot.h}px">
         <img src="${esc(s.url)}" alt="" loading="lazy">${MAG}</button>`;
-  }).join("") + PILLS.map(pill=>{
-    const edge=pill.side==="left"?`left:${pill.x}`:`right:${pill.x}`;
-    return `<div class="pill-f" style="${edge}; top:${pill.y}px">${esc(pill.text)}</div>`;
   }).join("");
+
+  // The same faces, as a strip, for viewports too narrow for the scatter. CSS decides
+  // which one is on screen; both are one tap away from the same run.
+  $("samples").innerHTML = list.map(s=>
+    `<button class="tile-s" type="button" data-file="${esc(s.file)}" data-url="${esc(s.url)}"
+       title="Search ${esc(s.name)}" aria-label="Search ${esc(s.name)}">
+       <img src="${esc(s.url)}" alt="" loading="lazy"></button>`).join("");
+  $("try").classList.remove("hidden");
+  $("samples").querySelectorAll(".tile-s").forEach(el=>el.onclick=()=>{
+    el.classList.add("busy");
+    runSample(el.dataset.file, el.dataset.url);
+  });
 
   scatter.querySelectorAll(".tile-f").forEach(el=>el.onclick=()=>{
     // Hold the tint on the tile that was clicked, so the click is acknowledged
@@ -971,7 +875,7 @@ async function runSample(fileName,url){
 /* One screen for both states: the results layout appears immediately with the
    query image and a skeleton grid, and fills in as stages complete. */
 async function begin(request){
-  RUNNING=true; RUN=null;
+  RUNNING=true; RUN=null; PAGE=PAGE_STEP; SHOW_REPOSTS=false;
   $("queryImg").src=UPLOAD||"";
   renderShell(); show("results");
   try{
@@ -1029,32 +933,29 @@ function show(w){
   $("newSearch").classList.toggle("hidden", landing);
   window.scrollTo(0, 0);
 }
-const kind=s=>s==="MATCH"?"ok":s==="NON_MATCH"?"bad":"warn";
-const SW={all:"#d67419",MATCH:"#1d9a57",NON_MATCH:"#e0453f",INCONCLUSIVE:"#c07b12"};
-
 function render(s){
   const r=RUN, cs=r.candidates||[], sel=r.selected;
   if(s && s.upload && (!UPLOAD || $("queryImg").naturalWidth === 0)){
     $("queryImg").src = s.upload;
   }
   $("prog").classList.add("hidden");
-  const n={all:cs.length,MATCH:0,NON_MATCH:0,INCONCLUSIVE:0};
+  const n={MATCH:0,NON_MATCH:0,INCONCLUSIVE:0};
   for(const c of cs) n[c.decision.status]=(n[c.decision.status]||0)+1;
   const matches=cs.filter(c=>c.decision.status==="MATCH");
-  const alternates=matches.filter(c=>!c.same_photo).length;
-  const exactPhotos=matches.length-alternates;
+  const distinct=matches.filter(c=>!c.same_photo);
+  const reposts=matches.filter(c=>c.same_photo);
+  const plural=(count, word)=>`${count} ${word}${count===1?"":"s"}`;
 
-  if(sel && alternates){
-    $("verdict").innerHTML=`<div class="verdict ok"><div class="h">Verified face match</div>
+  if(sel && distinct.length){
+    $("verdict").innerHTML=`<div class="verdict ok"><div class="h">Verified in ${plural(distinct.length,"distinct photo")}</div>
       <p>Cosine distance <strong>${sel.decision.distance.toFixed(4)}</strong> against a threshold
       of ${sel.decision.threshold}, a margin of ${sel.margin.toFixed(4)}.
-      ${alternates} alternate photo${alternates===1?"":"s"} passed the face gate${exactPhotos
-        ? `; ${exactPhotos} exact-photo duplicate${exactPhotos===1?" was":"s were"} kept for provenance`
-        : ""}.</p></div>`;
+      ${reposts.length ? `${plural(reposts.length,"source-image repost")} kept separately for provenance.`
+                       : "Every displayed result is a different photograph."}</p></div>`;
   } else if(sel){
-    $("verdict").innerHTML=`<div class="verdict warn"><div class="h">Exact photo found</div>
-      <p>The uploaded photograph was rediscovered, but no different photo of the same face
-      passed verification. ${cs.length} candidates were checked across the available routes.</p></div>`;
+    $("verdict").innerHTML=`<div class="verdict warn"><div class="h">Only the submitted image was rediscovered</div>
+      <p>${plural(reposts.length,"verified result")} reuse the submitted image. No distinct photo
+      passed the identity gate; ${cs.length} candidates were checked across the available routes.</p></div>`;
   } else if(r.error_code==="SEARCH_EMPTY"){
     $("verdict").innerHTML=`<div class="verdict warn"><div class="h">No social result found</div>
       <p>The live search returned nothing on the allowed platforms. This face may not be
@@ -1091,10 +992,16 @@ function render(s){
 
   const examined = cs.length;
   const rejected = examined - (n.MATCH || 0);
-  $("chips").innerHTML =
-    `<button class="chip on" data-f="MATCH">
-       <span class="sq" style="background:${SW.MATCH}"></span>Verified
-       <span class="n">${n.MATCH || 0}</span></button>` +
+  const summary = distinct.length
+    ? `<button class="chip on" type="button" aria-label="${plural(distinct.length,"verified distinct photo")}">
+         <span class="sq"></span>Distinct photos <span class="n">${distinct.length}</span></button>` +
+       (reposts.length ? `<span class="examined">${plural(reposts.length,"source-image repost")} set aside so the results start with new photos.</span>` : "")
+    : reposts.length
+      ? `<button class="chip on" type="button" aria-label="${plural(reposts.length,"verified source-image repost")}">
+           <span class="sq"></span>Submitted-image reposts <span class="n">${reposts.length}</span></button>` +
+        `<span class="examined">No distinct photo passed the face gate.</span>`
+      : "";
+  $("chips").innerHTML = summary +
     (rejected
       ? `<span class="examined">${examined} candidates examined, ${rejected} did not pass
            the face gate. Every one of them, with its distance and the reason, is in the
@@ -1103,10 +1010,11 @@ function render(s){
   const link = $("reportLink");
   if (link) link.onclick = ev => { ev.preventDefault(); openReport(); };
 
-  const shown=matches.sort((a,b)=>Number(a.same_photo)-Number(b.same_photo));
+  // A source-image repost remains accessible, but only joins the working set after the
+  // viewer asks for it. If no distinct photo exists, there is nothing to hide behind.
+  const shown=SHOW_REPOSTS || !distinct.length ? [...distinct,...reposts] : distinct;
   const page=shown.slice(0, PAGE);
   $("grid").innerHTML=page.map(c=>{
-    const s=c.decision.status,k=kind(s);
     const d=c.decision.distance!=null?c.decision.distance.toFixed(4):"-";
     const P=plat(c.platform), q=(c.media&&c.media.quality)||"";
     // Thumbnails are written per candidate index, so the grid shows what was examined.
@@ -1115,13 +1023,14 @@ function render(s){
                      onerror="this.parentNode.innerHTML=this.parentNode.innerHTML.replace(/<img[^>]*>/,'<div class=&quot;noimg&quot;>media not retrievable</div>')">`;
     const routes=(c.search_routes||[]).map(x=>`<span class="rt" title="${esc(x)}">${esc(x.split(":")[0])}</span>`).join("");
     const mt=q?`<span class="rt media" title="Media came from the ${esc(MEDIA[q]||q)}">${esc(q.toLowerCase())}</span>`:"";
-    const label=c.same_photo?"EXACT PHOTO":s;
-    const stampClass=c.same_photo?"exact":k;
-    const duplicate=c.same_photo
-      ? `<span class="rt" title="This is the uploaded photograph, possibly re-encoded">same photo</span>`
+    // In an all-repost result, repeating a badge on every card adds no information; the
+    // result-level verdict already says what those cards are. When mixed with distinct
+    // photos, the small provenance pill supplies the one distinction that matters.
+    const duplicate=c.same_photo && distinct.length
+      ? `<span class="rt duplicate" title="Downloaded media was confirmed as the submitted image, possibly re-encoded">same submitted image</span>`
       : "";
     return `<div class="card">
-      <div class="shot">${shot}<span class="stamp ${stampClass}">${esc(label)}</span><span class="d">d=${d}</span></div>
+      <div class="shot">${shot}<span class="d">d=${d}</span></div>
       <div class="cmeta">
         <div class="srow">${favicon(c, P)}
           <span class="cplat">${esc(P.n)}</span>
@@ -1134,8 +1043,12 @@ function render(s){
   }).join("");
 
   const more=shown.length-page.length;
-  $("more").classList.toggle("hidden", more<=0);
-  if(more>0) $("more").textContent=`Show ${more} more result${more===1?"":"s"}`;
+  // Page through every distinct result before offering reposts. Otherwise a large set
+  // of new photos could make the "show reposts" control appear to do nothing.
+  const revealReposts=!SHOW_REPOSTS && distinct.length && reposts.length && more<=0;
+  $("more").classList.toggle("hidden", !revealReposts && more<=0);
+  if(more>0) $("more").textContent=`Show ${plural(Math.min(more,PAGE_STEP),"more distinct photo")}`;
+  else if(revealReposts) $("more").textContent=`Show ${plural(reposts.length,"source-image repost")}`;
 
   const recs=r.search_records||[], srcs=r.sources||[];
   if(recs.length || srcs.length){
@@ -1153,16 +1066,14 @@ function render(s){
         <span class="flag ${x.from_cache?"off":"on"}">${x.from_cache?"CACHED":"LIVE"}</span></div>`).join("");
     $("audit").innerHTML=`<h4>Search audit</h4>
       <p class="lede2">Every source consulted and every provider call behind these results.
-         Sources run concurrently, so the search takes as long as the slowest one rather
-         than the sum. Each ID is checkable against the provider's own dashboard.</p>`
+         The initial Lens query seeds bounded follow-up sources, which run concurrently
+         where available. Each ID is checkable against the provider's own dashboard.</p>`
       + sourceRows + callRows;
   } else $("audit").classList.add("hidden");
 
-  // "No candidates in this category" was copy for filter chips that no longer exist. With
-  // only verified results on screen, an empty grid IS the answer to the search, so it says
-  // what happened rather than sounding like a filter that needs changing.
-  $("empty").classList.toggle("hidden", shown.length > 0);
-  if(!shown.length){
+  // An empty grid is the result when no candidate passed verification, not a filter state.
+  $("empty").classList.toggle("hidden", matches.length > 0);
+  if(!matches.length){
     const unsure = n.INCONCLUSIVE || 0;
     $("empty").innerHTML = examined
       ? `<h3>No verified match</h3>
@@ -1185,9 +1096,19 @@ $("openReport").onclick=openReport;
   show("results");
 }
 
-$("more").onclick=()=>{ PAGE+=PAGE_STEP; render(); };
+$("more").onclick=()=>{
+  const matches=(RUN?.candidates||[]).filter(c=>c.decision.status==="MATCH");
+  const hasDistinct=matches.some(c=>!c.same_photo);
+  const hasReposts=matches.some(c=>c.same_photo);
+  const visible=SHOW_REPOSTS || !hasDistinct ? matches : matches.filter(c=>!c.same_photo);
+  if(visible.length>PAGE) PAGE+=PAGE_STEP;
+  else if(!SHOW_REPOSTS && hasDistinct && hasReposts){
+    SHOW_REPOSTS=true;
+  }
+  render();
+};
 
-const reset=()=>{ if(RUNNING) return; RUN=null; PAGE=PAGE_STEP; show("landing"); };
+const reset=()=>{ if(RUNNING) return; RUN=null; PAGE=PAGE_STEP; SHOW_REPOSTS=false; show("landing"); };
 
 $("howLink").onclick=ev=>{
   ev.preventDefault();

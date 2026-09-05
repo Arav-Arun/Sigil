@@ -1,4 +1,4 @@
-"""Multi-route discovery with progressive escalation.
+"""Multi-route discovery with bounded fan-out.
 
 ===== ==================================================================== ========
 Route  What it asks                                                         Cost
@@ -38,6 +38,7 @@ throwing a result away before the face check is the one mistake that cannot be r
 from __future__ import annotations
 
 import logging
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -57,8 +58,8 @@ from sigil.search.normalize import (
 from sigil.search.providers.base import ProviderResult, run_providers
 from sigil.search.providers.exa import ExaProvider
 from sigil.search.providers.pages import PageHarvestProvider
+from sigil.search.providers.serpapi import SerpApiClient, WebSearchError, client_from_settings
 from sigil.search.providers.wikidata import WikidataProvider
-from sigil.search.serpapi import SerpApiClient, WebSearchError, client_from_settings
 
 logger = logging.getLogger(__name__)
 
@@ -75,8 +76,8 @@ def _iter_results(payload: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
     """Collect result items across every shape Lens uses, keeping the block they came from.
 
     The block matters: with ``type=all`` a single response carries exact matches, visual
-    matches and page results together, and only the first of those means "this is the same
-    photograph". Deriving that from the route name instead would mark all of them exact.
+    matches and page results together. The exact-image block remains a discovery hint;
+    downloaded media must still be compared before it can be called a source-image repost.
     """
 
     items: list[tuple[str, dict[str, Any]]] = []
@@ -140,6 +141,9 @@ def parse_candidates(
                     image_url=image_url,
                     thumbnail_url=thumbnail_url,
                     search_rank=int(item.get("position") or fallback_rank),
+                    # This says only that Lens put the result URL in an exact-image
+                    # result block. It is not the source-image verdict shown to people:
+                    # page images and provider thumbnails often differ from that URL.
                     exact_match=block == "exact_matches",
                     discovered_at=discovered_at,
                     search_routes=[route],
@@ -207,9 +211,10 @@ def infer_entities(payload: dict[str, Any], limit: int = 3) -> list[str]:
 
 
 # Google degrades badly on long site: disjunctions: an eleven-way OR chain reliably
-# returned nothing at all for a name that plainly has social coverage. Four platforms is
-# the point where it still behaves, and they are the four that carry personal posts.
+# returned nothing at all for a name that plainly has social coverage. Five platforms is
+# the point where it still behaves, and they cover the personal-post surfaces we support.
 PIVOT_DOMAINS = ("instagram.com", "x.com", "facebook.com", "linkedin.com", "youtube.com")
+MAX_DISCOVERY_PAGES = 2
 
 
 def _site_query(entity: str, domains: tuple[str, ...] = PIVOT_DOMAINS) -> str:
@@ -252,7 +257,6 @@ def merge_candidates(candidates: list[SearchCandidate]) -> list[SearchCandidate]
         key=lambda item: (
             not item.is_social,
             -len(item.search_routes),
-            not item.exact_match,
             item.search_rank,
             str(item.source_url),
         ),
@@ -264,9 +268,9 @@ def select_candidates(candidates: list[SearchCandidate], limit: int) -> list[Sea
 
     Lens routinely returns sixty visually similar items for each query. Taking the first
     ``limit`` after a global sort meant R1 could occupy every slot, even when it was matching
-    a shirt rather than a face. Exact-image hits are retained for provenance, then the
-    remaining slots are filled round-robin across discovery routes. Ordering within each
-    route still comes from :func:`merge_candidates`.
+    a shirt rather than a face. The slots are filled round-robin across discovery routes so
+    each route contributes independent evidence. Ordering within each route still comes
+    from :func:`merge_candidates`.
     """
 
     if limit <= 0:
@@ -289,17 +293,18 @@ def select_candidates(candidates: list[SearchCandidate], limit: int) -> list[Sea
         selected.append(item)
         return True
 
-    for item in merged:
-        if item.exact_match:
-            add(item)
-
     def route_group(route: str) -> str:
         # A page harvester records the source domain in its route. Those domains are one
         # discovery method, not dozens of independent methods entitled to separate quota.
         return "page-harvest" if route.startswith("page-harvest:") else route
 
+    grouped: dict[str, dict[tuple[str, str], SearchCandidate]] = {}
+    for item in merged:
+        for route in item.search_routes:
+            grouped.setdefault(route_group(route), {})[identity(item)] = item
+
     routes = sorted(
-        {route_group(route) for item in merged for route in item.search_routes},
+        grouped,
         key=lambda route: (
             0
             if "lens-all-face" in route
@@ -319,15 +324,11 @@ def select_candidates(candidates: list[SearchCandidate], limit: int) -> list[Sea
     )
     buckets = {
         route: sorted(
-            [
-                item
-                for item in merged
-                if route in {route_group(value) for value in item.search_routes}
-            ],
-            # Keep the search provider's own rank inside a route. Global social-first
-            # sorting is useful for presentation, but it hid R1's rank-one exact photo
-            # behind a dozen unrelated social results about a logo on the shirt.
-            key=lambda item: (not item.exact_match, item.search_rank, not item.is_social),
+            grouped[route].values(),
+            # Keep the search provider's own rank inside a route. Provider result buckets
+            # are discovery hints, not identity evidence, so exact-image flags never affect
+            # candidate selection.
+            key=lambda item: (item.search_rank, not item.is_social),
         )
         for route in routes
     }
@@ -398,6 +399,7 @@ def discover(
     entities: list[str] = []
 
     def lens_route(name: str, path: str | Path, search_type: str = "all") -> dict[str, Any]:
+        started = time.perf_counter()
         uploaded = active.upload_image(path)
         payload = active.lens(
             uploaded,
@@ -409,7 +411,12 @@ def discover(
         )
         found = parse_candidates(payload, route=name, discovered_at=discovered_at)
         logger.info("route %s: %d candidate(s)", name, len(found))
-        return {"name": name, "payload": payload, "found": found}
+        return {
+            "name": name,
+            "payload": payload,
+            "found": found,
+            "elapsed_ms": (time.perf_counter() - started) * 1000,
+        }
 
     def web_route(name: str, entity: str) -> dict[str, Any]:
         payload = active.web(_site_query(entity), route=name, country=country, language=language)
@@ -421,6 +428,15 @@ def discover(
         raw_responses[outcome["name"]] = outcome["payload"]
         routes_run.append(outcome["name"])
         candidates.extend(outcome["found"])
+        source_reports.append(
+            {
+                "source": outcome["name"],
+                "candidates": len(outcome["found"]),
+                "entities": [],
+                "elapsed_ms": round(float(outcome.get("elapsed_ms", 0.0)), 1),
+                "error": "",
+            }
+        )
         payload: dict[str, Any] = outcome["payload"]
         return payload
 
@@ -432,6 +448,7 @@ def discover(
         # which is why it cannot simply join the fan-out below.
         first = lens_route("R1:lens-all-full", image_path, "all")
         entities = infer_entities(collect(first))
+        source_reports[-1]["entities"] = list(entities)
 
         # A caller-supplied name goes to the front. Lens infers a name only for people it
         # already recognises, which excludes exactly the subjects that are hardest to
@@ -491,12 +508,14 @@ def discover(
             str(c.source_url)
             for c in sorted(
                 merge_candidates(candidates),
-                key=lambda item: (not item.exact_match, item.search_rank, str(item.source_url)),
+                key=lambda item: (item.search_rank, str(item.source_url)),
             )
             if not c.is_social and not str(c.source_url).startswith("data:")
         ]
         if harvest_pages:
-            harvested = PageHarvestProvider().harvest(harvest_pages, discovered_at=discovered_at)
+            harvested = PageHarvestProvider(timeout=resolved.http_timeout_seconds).harvest(
+                harvest_pages, discovered_at=discovered_at, max_pages=MAX_DISCOVERY_PAGES
+            )
             source_reports.append(harvested.summary())
             raw_responses[harvested.name] = harvested.raw
             if harvested.candidates:

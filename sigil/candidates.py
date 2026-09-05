@@ -29,6 +29,7 @@ from urllib.parse import urljoin
 import httpx
 from PIL import Image
 
+from sigil import __version__
 from sigil.models import SearchCandidate
 from sigil.search.normalize import is_public_http_url
 
@@ -41,7 +42,7 @@ IMAGE_CONTENT_TYPES = ("image/jpeg", "image/png", "image/webp", "image/gif", "im
 
 BROWSER_UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36 Sigil/0.3"
+    f"(KHTML, like Gecko) Chrome/124.0 Safari/537.36 Sigil/{__version__}"
 )
 
 OG_IMAGE = re.compile(

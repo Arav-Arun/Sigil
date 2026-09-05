@@ -127,8 +127,8 @@ def _check_serpapi(settings: Settings, *, live: bool) -> CheckResult:
         return _ok("serpapi", "key configured (pass --live to query remaining quota)")
 
     try:
+        from sigil.search.providers.serpapi import SerpApiClient
         from sigil.search.quota import DEFAULT_RESERVE
-        from sigil.search.serpapi import SerpApiClient
 
         status = SerpApiClient(settings.serpapi_key.get_secret_value()).account()
     except Exception as exc:

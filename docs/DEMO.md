@@ -28,7 +28,7 @@ Every row must be `PASS` or a `WARN` you understand. In particular:
 Then:
 
 - [ ] `git status` clean; note the commit you are recording, you will tag it afterwards.
-- [ ] `make test` green.
+- [ ] `uv run --group dev pytest -q` and `npm test` green.
 - [ ] Do Not Disturb on. Close Slack, mail, and anything that can raise a banner.
 - [ ] Terminal at a readable size, aim for ~100 columns at 1080p, large font.
 - [ ] Browser open with two blank tabs (one for the social post, one for Etherscan).
@@ -141,12 +141,26 @@ Say the part that matters:
 
 ### 7b. Verify in a browser, with nothing installed (~20 s)
 
-Open `verify.html` from a `file://` URL and drop the bundle folder onto it.
+Open `sigil/static/verify.html` from a `file://` URL and drop the bundle folder onto it.
 
 > "This is a second, independent implementation of the canonicalization and the Merkle
 > tree, in JavaScript, in a page with no build step and no dependencies. If it agrees with
 > the Python, the format is the thing being verified, not my code. It reads the registry
 > address out of the bundle receipt and checks it with a plain `eth_call`."
+
+### 7c. The wrong-contract demo (~20 s), optional but strong
+
+Point the verifier at a different real contract and watch it refuse:
+
+```bash
+CONTRACT_ADDRESS=0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14 \
+  sigil verify --bundle data/bundles/<run-id>; echo "exit: $?"
+```
+
+> "The address a verifier uses can come out of the bundle itself, so 'the contract said
+> yes' isn't enough — a look-alike with the same interface could say yes to anything. It
+> hashes the deployed bytecode and compares it to what the deploy recorded. Wrong
+> contract, exit 3."
 
 ### 8. The tamper demo (~45 s), the closer
 
@@ -187,7 +201,7 @@ exit code: 3
 
 Restore it and show `PASS` again, so the bundle you leave behind is the real one.
 
-If you showed `verify.html` at step 7b, drop the tampered bundle on it too: the browser
+If you showed the browser verifier at step 7b, drop the tampered bundle on it too: the browser
 names the same field, from a completely separate implementation. That is the difference
 between "my code says it is fine" and "the evidence is checkable".
 
@@ -227,7 +241,7 @@ than one that always answers.
 | `SEARCH_EMPTY` | Stop and restart with a backup image. Do not retry the same input on camera. |
 | `SEARCH_UNAVAILABLE` | Provider outage or quota. Check `sigil preflight --live`, then reschedule. |
 | `NO_VERIFIED_MATCH` | The honest answer. Either narrate it as the abstention demo, or restart with a backup. |
-| `CHAIN_PENDING` | Sepolia is slow. The bundle is intact, finish with `sigil anchor --bundle <dir>` and show the receipt. Don't re-run the search. |
+| `CHAIN_PENDING` | Sepolia is slow. The transaction hash is already saved in the bundle's `pending.json`, so `sigil anchor --bundle <dir>` resumes that exact transaction rather than signing a new one. Don't re-run the search. |
 | Wallet has no ETH | Faucet, then `sigil anchor --bundle <dir>`. The evidence is already built. |
 
 The design principle behind that table: discovery and evidence complete before the chain

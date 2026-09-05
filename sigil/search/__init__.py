@@ -8,6 +8,7 @@ from sigil.search.normalize import (
     is_social_url,
     normalized_hostname,
 )
+from sigil.search.providers.serpapi import SerpApiClient, WebSearchError, client_from_settings
 from sigil.search.quota import AccountStatus, QuotaError, SearchBudget, check_reserve
 from sigil.search.routes import (
     discover,
@@ -15,7 +16,6 @@ from sigil.search.routes import (
     merge_candidates,
     parse_candidates,
 )
-from sigil.search.serpapi import SerpApiClient, WebSearchError, client_from_settings
 
 __all__ = [
     "AccountStatus",

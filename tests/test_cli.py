@@ -39,8 +39,10 @@ def test_verify_fails_with_exit_config_if_bundle_missing(tmp_path: Path) -> None
     assert exit_code == 2
 
 
-def test_chain_target_prefers_settings_over_receipt(tmp_path: Path) -> None:
-    from sigil.cli import _chain_target
+def test_registry_resolution_prefers_settings_over_receipt(tmp_path: Path) -> None:
+    """A receipt travels with the evidence, so it must never outrank configuration."""
+
+    from sigil.chain import resolve_registry
     from sigil.config import Settings
 
     bundle = tmp_path / "bundle"
@@ -54,6 +56,21 @@ def test_chain_target_prefers_settings_over_receipt(tmp_path: Path) -> None:
         SEPOLIA_RPC_URL="https://sepolia.custom.example",
         CONTRACT_ADDRESS="0x2222222222222222222222222222222222222222",
     )
-    rpc, contract, _ = _chain_target(bundle, settings)
+    rpc, contract, _ = resolve_registry(bundle, settings)
     assert rpc == "https://sepolia.custom.example"
     assert contract == "0x2222222222222222222222222222222222222222"
+
+
+def test_registry_resolution_falls_back_to_the_public_endpoint(tmp_path: Path) -> None:
+    """With no credentials at all, verification still has somewhere to read from."""
+
+    from sigil.chain import PUBLIC_SEPOLIA_RPC, resolve_registry
+    from sigil.config import Settings
+
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    rpc, contract, provenance = resolve_registry(bundle, Settings(_env_file=None))
+    assert rpc == PUBLIC_SEPOLIA_RPC
+    # The checked-in deployment record is the trust anchor when nothing is configured.
+    assert contract.startswith("0x")
+    assert "checked-in" in provenance

@@ -42,6 +42,28 @@ BACKGROUND = (17, 24, 39)
 TEXT = (229, 231, 235)
 
 
+def _pretty_url(url: str, limit: int = 44) -> str:
+    """A readable one-line form of a URL: host without ``www.``, then a trimmed path.
+
+    The full URL stays in the link's href and title, so nothing is lost. Rendering the
+    raw URL as the cell's text is what let a long link fight the table for width and
+    lose, ending up broken one character per line.
+    """
+
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return url[:limit]
+    host = parts.netloc.removeprefix("www.")
+    tail = parts.path.rstrip("/")
+    if parts.query:
+        tail = f"{tail}?{parts.query}"
+    text = f"{host}{tail}" or url
+    return text if len(text) <= limit else text[: limit - 1] + "\u2026"
+
+
 def _thumbnail(media_bytes: bytes, size: int = TILE) -> Image.Image:
     """Decode candidate media into a fixed-size tile, or a placeholder if undecodable."""
 
@@ -188,6 +210,7 @@ def html_report(
             str(status)
         ]
         distance = f"{item.decision.distance:.4f}" if item.decision.distance is not None else "-"
+        url = str(item.candidate.source_url)
         rows.append(
             f"<tr>"
             f"<td>{index}</td>"
@@ -195,9 +218,9 @@ def html_report(
             f'<td class="mono">{distance}</td>'
             f"<td>{item.faces_detected}</td>"
             f"<td>{html.escape(str(item.media.quality).lower())}</td>"
-            f'<td class="url"><a href="{html.escape(str(item.candidate.source_url))}" '
-            f'rel="noopener noreferrer">{html.escape(str(item.candidate.source_url))}</a></td>'
-            f"<td>{html.escape(item.decision.reason)}</td>"
+            f'<td class="url"><a href="{html.escape(url)}" title="{html.escape(url)}" '
+            f'rel="noopener noreferrer">{html.escape(_pretty_url(url))}</a></td>'
+            f'<td class="reason">{html.escape(item.decision.reason)}</td>'
             f"</tr>"
         )
 
@@ -281,7 +304,12 @@ def html_report(
            font-size: 13px; }}
   .root {{ background: #e9eafd; border: 1px solid #d9dbfa; border-radius: 12px;
            padding: 16px 18px; margin: 14px 0; }}
-  .url {{ max-width: 280px; overflow-wrap: anywhere; }}
+  /* The link text is elided on one line rather than wrapped. `max-width` on a table cell
+     is advisory, so a wide neighbouring column could squeeze this one to a few
+     characters, and `overflow-wrap:anywhere` then broke the URL one letter per line. */
+  .url a {{ display: block; max-width: 34ch; overflow: hidden; text-overflow: ellipsis;
+            white-space: nowrap; }}
+  .reason {{ min-width: 22ch; }}
   .muted {{ color: #6c6c9c; font-size: 15px; }}
   img {{ max-width: 100%; border-radius: 10px; border: 1px solid #e6e6f2; }}
   .side {{ display: flex; gap: 16px; flex-wrap: wrap; }}
@@ -291,7 +319,7 @@ def html_report(
 </style>
 <div class="wrap">
   <h1>Sigil evidence report</h1>
-  <p class="tag">A face, sealed · generated {datetime.now(UTC):%Y-%m-%d %H:%M UTC}</p>
+  <p class="tag">Generated {datetime.now(UTC):%Y-%m-%d %H:%M UTC}</p>
 
   <div class="root">
     <div class="muted">Evidence root (Merkle, anchored on-chain)</div>

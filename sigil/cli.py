@@ -26,7 +26,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from sigil import __app_name__, __version__
-from sigil.config import ROOT_DIR, ConfigurationError, Settings, get_settings
+from sigil.config import ConfigurationError, Settings, get_settings
 from sigil.models import DecisionStatus, PipelineErrorCode
 from sigil.preflight import preflight_passed, run_preflight
 
@@ -39,7 +39,10 @@ EXIT_VERIFY_FAILED = 3
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="sigil", description="A face, sealed.")
+    parser = argparse.ArgumentParser(
+        prog="sigil",
+        description="Find a face on the public web and record the result so it can be checked.",
+    )
     parser.add_argument("--version", action="version", version=f"{__app_name__} {__version__}")
     parser.add_argument("-v", "--verbose", action="store_true", help="Show stage-level logging")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -80,22 +83,6 @@ def build_parser() -> argparse.ArgumentParser:
     proof.add_argument("--skip-chain", action="store_true", help="Skip anchoring (requirement 3)")
     proof.add_argument("--json", action="store_true", dest="as_json")
 
-    idx = sub.add_parser("index", help="Build and query a local face index")
-    idx_sub = idx.add_subparsers(dest="index_command", required=True)
-    idx_build = idx_sub.add_parser("build", help="Embed and index a corpus")
-    idx_build.add_argument("--corpus", default="lfw", choices=["lfw", "runs"])
-    idx_build.add_argument("--limit", type=int, default=None, help="Cap images indexed")
-    idx_build.add_argument("--json", action="store_true", dest="as_json")
-    idx_eval = idx_sub.add_parser("eval", help="Measure recall and query latency")
-    idx_eval.add_argument("--corpus", default="lfw", choices=["lfw", "runs"])
-    idx_eval.add_argument("--queries", type=int, default=300)
-    idx_eval.add_argument("--json", action="store_true", dest="as_json")
-    idx_search = idx_sub.add_parser("search", help="Find the nearest faces to an image")
-    idx_search.add_argument("--image", required=True, type=Path)
-    idx_search.add_argument("--corpus", default="lfw", choices=["lfw", "runs"])
-    idx_search.add_argument("--top", type=int, default=10)
-    idx_search.add_argument("--json", action="store_true", dest="as_json")
-
     pre = sub.add_parser("preflight", help="Check the local environment before a demo")
     pre.add_argument("--live", action="store_true", help="Also query SerpApi quota and the RPC")
     pre.add_argument("--json", action="store_true", dest="as_json")
@@ -107,18 +94,34 @@ def build_parser() -> argparse.ArgumentParser:
 
     bench = sub.add_parser("benchmark", help="Measure accuracy and latency on LFW")
     bench.add_argument("--limit", type=int, default=None, help="Cap pairs per split")
-    bench.add_argument(
-        "--resolution",
-        action="store_true",
-        help="Measure small-face recovery against a lanczos control instead",
-    )
     bench.add_argument("--cpu", action="store_true", help="Force the CPU execution provider")
+    bench.add_argument(
+        "--quality-only",
+        action="store_true",
+        help="Measure only the resolution sweep and repost test, merging into the report",
+    )
     bench.add_argument("--output", type=Path, default=Path("docs/benchmark.json"))
     bench.add_argument("--json", action="store_true", dest="as_json")
     return parser
 
 
 # -- rendering --------------------------------------------------------------------
+
+
+def _print_url(label: str, url: str) -> None:
+    """Print a URL on its own line, unwrapped.
+
+    Rich wraps to the console width, and inside a Panel that width is the border-inset
+    one. A 79-character explorer link then breaks mid-address, which is worse than
+    useless: `…1F395` on one line and `517` on the next cannot be clicked or copied, and
+    a truncated hex address is the kind of thing someone pastes into a block explorer
+    without noticing. So links are printed outside panels, with wrapping turned off.
+    """
+
+    if not url:
+        return
+    console.print(f"  {label}", style="dim", end=" ")
+    console.print(url, soft_wrap=True, no_wrap=True, overflow="ignore")
 
 
 def _render_candidates(result: Any) -> None:
@@ -173,7 +176,7 @@ def _render_result(result: Any) -> None:
     if result.receipt:
         console.print(f"  transaction   : {result.receipt.transaction_hash}")
         console.print(f"  block         : {result.receipt.block_number}")
-        console.print(f"  explorer      : [link]{result.receipt.explorer_url}[/link]")
+        _print_url("explorer      :", result.receipt.explorer_url)
 
     if result.timings_ms:
         timings = "  ".join(f"{k} {v:.0f}ms" for k, v in result.timings_ms.items())
@@ -252,60 +255,53 @@ def cmd_run(args: argparse.Namespace, settings: Settings) -> int:
     return EXIT_NO_MATCH
 
 
-# A public Sepolia endpoint, so re-verification needs no account anywhere. Reading a
-# public ledger should not require a signup, and the whole claim of this project is that
-# a third party can check the proof without asking us for anything.
-PUBLIC_SEPOLIA_RPC = "https://ethereum-sepolia-rpc.publicnode.com"
+def _read_chain(bundle: Path, root: str, settings: Settings) -> tuple[bool, dict[str, Any], str]:
+    """Look one root up on chain. Returns ``(ok, payload, provenance)``.
 
-
-def _chain_target(bundle: Path, settings: Settings) -> tuple[str, str, str]:
-    """Decide which registry to read, preferring configuration over checked-in metadata.
-
-    The committed deployment is a reviewable trust anchor for this project. A bundle
-    receipt is only a fallback for an older checkout without deployment metadata, so a
-    tampered receipt cannot redirect an otherwise clean verifier to a different contract.
+    Any failure to reach or agree with the chain, an outage as much as a missing root,
+    returns ``ok=False``. Verification that could not be completed is not verification.
     """
 
-    rpc_url = settings.sepolia_rpc_url.get_secret_value() or ""
-    contract = settings.contract_address or ""
-    if rpc_url and contract:
-        return rpc_url, contract, ""
+    from sigil.chain import SEPOLIA_CHAIN_ID, ChainClient, ChainError, resolve_registry
+    from sigil.evidence.bundle import load_proofs
 
-    from sigil.chain import SEPOLIA_CHAIN_ID, load_deployment
+    try:
+        rpc_url, contract, provenance = resolve_registry(bundle, settings)
+        client = ChainClient(rpc_url, contract, expected_chain_id=SEPOLIA_CHAIN_ID)
+        # Identity before the read, matching the browser verifier. An answer from the
+        # wrong contract is worse than no answer, because it looks like a pass, and a
+        # look-alike that reverts should be reported as the wrong contract rather than
+        # as an RPC fault.
+        identity, identity_detail = client.registry_identity()
+        if identity == "mismatch":
+            return False, {"contract_identity": identity, "error": identity_detail}, provenance
+        record = client.read(root)
+    except (ChainError, ConfigurationError) as exc:
+        return False, {"error": str(exc)}, ""
 
-    receipt_path = Path(bundle) / "receipt.json"
-    receipt: dict[str, Any] = {}
-    if receipt_path.is_file():
-        try:
-            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            receipt = {}
-
-    notes: list[str] = []
-    if not contract:
-        deployment = load_deployment(SEPOLIA_CHAIN_ID) or {}
-        contract = str(deployment.get("address") or "")
-        if contract:
-            notes.append(f"using checked-in Sepolia registry {contract}")
-    if not contract:
-        contract = str(receipt.get("contract_address") or "")
-        if contract:
-            notes.append(f"registry {contract} read from the bundle receipt")
-    if not rpc_url:
-        rpc_url = PUBLIC_SEPOLIA_RPC
-        notes.append(f"using the public endpoint {PUBLIC_SEPOLIA_RPC}")
-
-    if not contract:
-        raise ConfigurationError(
-            "Missing required configuration: CONTRACT_ADDRESS "
-            "(and the bundle has no receipt.json to read it from)"
+    expected_schema = int(load_proofs(bundle).get("schema_version", 1))
+    payload: dict[str, Any] = {
+        "contract_identity": identity,
+        "contract_identity_detail": identity_detail,
+        "exists": record.exists,
+        "submitter": record.submitter,
+        "anchored_at": record.anchored_at.isoformat() if record.anchored_at else None,
+        "schema_version": record.schema_version,
+        "chain_id": record.chain_id,
+        "contract": record.contract_address,
+        "explorer": record.explorer_url(),
+    }
+    if record.exists and record.schema_version != expected_schema:
+        payload["error"] = (
+            f"schema version {record.schema_version} does not match bundle version "
+            f"{expected_schema}"
         )
-    return rpc_url, contract, ", ".join(notes)
+        return False, payload, provenance
+    return record.exists, payload, provenance
 
 
 def cmd_verify(args: argparse.Namespace, settings: Settings) -> int:
-    from sigil.chain import SEPOLIA_CHAIN_ID, ChainClient, ChainError
-    from sigil.evidence.bundle import BundleError, load_proofs, verify_bundle
+    from sigil.evidence.bundle import BundleError, verify_bundle
 
     try:
         outcome = verify_bundle(args.bundle)
@@ -315,7 +311,7 @@ def cmd_verify(args: argparse.Namespace, settings: Settings) -> int:
 
     payload: dict[str, Any] = {
         "root": outcome.root,
-        "local_ok": outcome.tamper.ok and not outcome.artifact_failures,
+        "local_ok": outcome.ok,
         "tamper": {
             "modified": list(outcome.tamper.modified),
             "added": list(outcome.tamper.added),
@@ -325,106 +321,85 @@ def cmd_verify(args: argparse.Namespace, settings: Settings) -> int:
         "artifact_failures": list(outcome.artifact_failures),
     }
 
-    local_ok = payload["local_ok"]
     if not args.as_json:
-        style = "green" if local_ok else "red"
         console.print(
             Panel(
                 f"root {outcome.root}\n"
                 + (
                     "evidence intact, every field hashes to the anchored root"
-                    if local_ok
+                    if outcome.ok
                     else outcome.summary()
                 ),
-                title="Local verification " + ("PASS" if local_ok else "FAIL"),
-                border_style=style,
+                title="Local verification " + ("PASS" if outcome.ok else "FAIL"),
+                border_style="green" if outcome.ok else "red",
             )
         )
-        if outcome.tamper.modified:
-            for field_name in outcome.tamper.modified:
-                console.print(f"  [red]✗ tampered field:[/red] [bold]{field_name}[/bold]")
+        for field_name in outcome.tamper.modified:
+            console.print(f"  [red]✗ tampered field:[/red] [bold]{field_name}[/bold]")
 
-    chain_ok = None
+    chain_ok: bool | None = None
     if not args.local_only:
-        try:
-            rpc_url, contract, provenance = _chain_target(args.bundle, settings)
-            if not args.as_json and provenance:
+        chain_ok, chain, provenance = _read_chain(args.bundle, outcome.root, settings)
+        payload["chain"] = chain
+        if not args.as_json:
+            if provenance:
                 console.print(f"[dim]{provenance}[/dim]")
-            client = ChainClient(rpc_url, contract, expected_chain_id=SEPOLIA_CHAIN_ID)
-            record = client.read(outcome.root)
-            expected_schema = int(load_proofs(args.bundle).get("schema_version", 1))
-            chain_ok = record.exists and record.schema_version == expected_schema
-            payload["chain"] = {
-                "exists": record.exists,
-                "submitter": record.submitter,
-                "anchored_at": record.anchored_at.isoformat() if record.anchored_at else None,
-                "schema_version": record.schema_version,
-                "chain_id": record.chain_id,
-                "contract": record.contract_address,
-                "explorer": record.explorer_url(),
-            }
-            if record.exists and record.schema_version != expected_schema:
-                payload["chain"]["error"] = (
-                    f"schema version {record.schema_version} does not match bundle version "
-                    f"{expected_schema}"
+            mark = {"verified": "[green]✓[/green]", "unrecorded": "[yellow]?[/yellow]"}.get(
+                str(chain.get("contract_identity", "")), "[red]✗[/red]"
+            )
+            if chain.get("contract_identity_detail"):
+                console.print(f"  {mark} registry: {chain['contract_identity_detail']}")
+            if chain.get("error"):
+                console.print(f"[red]on-chain check failed:[/red] {chain['error']}")
+            elif not chain_ok:
+                console.print(
+                    Panel(
+                        f"root {outcome.root} is NOT anchored on chain {chain['chain_id']}",
+                        title="On-chain verification FAIL",
+                        border_style="red",
+                    )
                 )
-            if not args.as_json:
-                if record.exists and local_ok:
-                    console.print(
-                        Panel(
-                            f"anchored by {record.submitter}\n"
-                            f"at {record.anchored_at} on chain {record.chain_id}\n"
-                            f"{record.explorer_url()}",
-                            title="On-chain verification PASS",
-                            border_style="green",
-                        )
+            elif outcome.ok:
+                console.print(
+                    Panel(
+                        f"anchored by {chain['submitter']}\n"
+                        f"at {chain['anchored_at']} on chain {chain['chain_id']}",
+                        title="On-chain verification PASS",
+                        border_style="green",
                     )
-                elif record.exists:
-                    # The root is genuinely anchored, but this bundle no longer hashes
-                    # to it. Rendering a green PASS here would let a tampered bundle
-                    # read as verified at a glance, which is the exact failure this
-                    # whole design exists to prevent.
-                    console.print(
-                        Panel(
-                            f"The anchored root exists on chain {record.chain_id}, "
-                            f"submitted by {record.submitter}\n"
-                            f"at {record.anchored_at}, but the bundle on disk no longer "
-                            "matches it.\n"
-                            "The on-chain record is intact; the local evidence is not.",
-                            title="On-chain record found, but the evidence does NOT match",
-                            border_style="red",
-                        )
+                )
+                _print_url("registry:", str(chain.get("explorer", "")))
+            else:
+                # The root is genuinely anchored, but this bundle no longer hashes to it.
+                # A green PASS here would let a tampered bundle read as verified at a
+                # glance, which is the exact failure this design exists to prevent.
+                console.print(
+                    Panel(
+                        f"The anchored root exists on chain {chain['chain_id']}, "
+                        f"submitted by {chain['submitter']}\n"
+                        f"at {chain['anchored_at']}, but the bundle on disk no longer "
+                        "matches it.\n"
+                        "The on-chain record is intact; the local evidence is not.",
+                        title="On-chain record found, but the evidence does NOT match",
+                        border_style="red",
                     )
-                else:
-                    console.print(
-                        Panel(
-                            f"root {outcome.root} is NOT anchored on chain {record.chain_id}",
-                            title="On-chain verification FAIL",
-                            border_style="red",
-                        )
-                    )
-        except (ChainError, ConfigurationError) as exc:
-            # An unavailable or misconfigured chain is not a successful verification.
-            # Keep the diagnostic distinct from a missing root, but return the same
-            # verification-failed exit code so automation cannot mistake it for PASS.
-            chain_ok = False
-            payload["chain"] = {"error": str(exc)}
-            if not args.as_json:
-                console.print(f"[red]on-chain check failed:[/red] {exc}")
+                )
 
     if args.as_json:
         print(json.dumps(payload, indent=2, default=str))
-
-    if not local_ok:
-        return EXIT_VERIFY_FAILED
-    if chain_ok is False:
-        return EXIT_VERIFY_FAILED
-    return EXIT_OK
+    return EXIT_OK if outcome.ok and chain_ok is not False else EXIT_VERIFY_FAILED
 
 
 def cmd_anchor(args: argparse.Namespace, settings: Settings) -> int:
-    from sigil.chain import SEPOLIA_CHAIN_ID, ChainClient, ChainError
-    from sigil.evidence.bundle import BundleError, attach_receipt, load_proofs
+    from sigil.chain import SEPOLIA_CHAIN_ID, ChainClient, ChainError, resolve_registry
+    from sigil.evidence.bundle import (
+        BundleError,
+        attach_receipt,
+        clear_pending,
+        load_pending,
+        load_proofs,
+        write_pending,
+    )
 
     try:
         proofs = load_proofs(args.bundle)
@@ -433,31 +408,44 @@ def cmd_anchor(args: argparse.Namespace, settings: Settings) -> int:
         return EXIT_CONFIG
 
     root = str(proofs["root"])
+    pending = load_pending(args.bundle)
     try:
-        settings.require("chain-write")
-        client = ChainClient(
-            settings.sepolia_rpc_url.get_secret_value(),
-            settings.contract_address,
-            expected_chain_id=SEPOLIA_CHAIN_ID,
-        )
-        receipt = client.anchor(
-            root, int(proofs.get("schema_version", 1)), settings.private_key.get_secret_value()
-        )
+        if pending:
+            # A previous attempt got the transaction on chain but timed out waiting.
+            # Resuming needs no key, and signing again could anchor twice.
+            rpc_url, contract, _ = resolve_registry(args.bundle, settings)
+            client = ChainClient(rpc_url, contract, expected_chain_id=SEPOLIA_CHAIN_ID)
+            console.print(f"[dim]resuming pending transaction {pending}[/dim]")
+            receipt = client.await_transaction(pending, root)
+        else:
+            settings.require("chain-write")
+            client = ChainClient(
+                settings.sepolia_rpc_url.get_secret_value(),
+                settings.contract_address,
+                expected_chain_id=SEPOLIA_CHAIN_ID,
+            )
+            receipt = client.anchor(
+                root, int(proofs.get("schema_version", 1)), settings.private_key.get_secret_value()
+            )
     except (ChainError, ConfigurationError) as exc:
+        if getattr(exc, "transaction_hash", ""):
+            write_pending(args.bundle, exc.transaction_hash, SEPOLIA_CHAIN_ID)  # type: ignore[union-attr]
         console.print(f"[red]{exc}[/red]")
         return EXIT_CONFIG
 
+    clear_pending(args.bundle)
     attach_receipt(args.bundle, receipt)
     if args.as_json:
         print(receipt.model_dump_json(indent=2))
     else:
         console.print(
             Panel(
-                f"root {root}\ntx {receipt.transaction_hash}\n{receipt.explorer_url}",
+                f"root {root}\ntx {receipt.transaction_hash}",
                 title="Anchored",
                 border_style="green",
             )
         )
+        _print_url("explorer:", receipt.explorer_url)
     return EXIT_OK
 
 
@@ -498,109 +486,6 @@ def cmd_prove(args: argparse.Namespace, settings: Settings) -> int:
     return EXIT_OK if report.passed else EXIT_VERIFY_FAILED
 
 
-def cmd_index(args: argparse.Namespace, settings: Settings) -> int:
-    """Build, measure, or query the local face index."""
-
-    from sigil.index import FaceIndex, build_index, evaluate_index, index_path
-
-    path = index_path(args.corpus)
-
-    if args.index_command == "build":
-        from rich.progress import (
-            BarColumn,
-            MofNCompleteColumn,
-            Progress,
-            TimeRemainingColumn,
-        )
-
-        with Progress(
-            *Progress.get_default_columns()[:2],
-            BarColumn(),
-            MofNCompleteColumn(),
-            TimeRemainingColumn(),
-            console=console,
-        ) as progress:
-            task = progress.add_task(f"Indexing {args.corpus}", total=args.limit)
-
-            def advance(done: int, total: int) -> None:
-                progress.update(task, completed=done, total=total)
-
-            index = build_index(args.corpus, limit=args.limit, on_progress=advance)
-        index.save(path)
-        payload = index.stats.to_json()
-        if args.as_json:
-            print(json.dumps(payload, indent=2))
-            return EXIT_OK
-        table = Table(title=f"Face index built from {args.corpus}")
-        table.add_column("Metric")
-        table.add_column("Value", justify="right")
-        for key, value in payload.items():
-            table.add_row(key.replace("_", " "), str(value))
-        console.print(table)
-        console.print(f"  [dim]{path}[/dim]")
-        return EXIT_OK
-
-    if not path.is_file():
-        console.print(
-            f"[red]No index at {path}.[/red] Build one: sigil index build --corpus {args.corpus}"
-        )
-        return EXIT_CONFIG
-    index = FaceIndex.load(path)
-
-    if args.index_command == "eval":
-        report = evaluate_index(index, queries=args.queries)
-        if args.as_json:
-            print(json.dumps(report, indent=2))
-            return EXIT_OK
-        table = Table(title="Face index retrieval, leave-one-out")
-        table.add_column("Metric")
-        table.add_column("Value", justify="right")
-        for key, value in report.items():
-            if key == "note":
-                continue
-            table.add_row(key.replace("_", " "), str(value))
-        console.print(table)
-        console.print(f"  [dim]{report.get('note', '')}[/dim]")
-        return EXIT_OK
-
-    # search
-    import tempfile
-
-    import numpy as np
-
-    from sigil.face import detect_and_encode
-
-    with tempfile.TemporaryDirectory() as tmp:
-        face = detect_and_encode(args.image, tmp, select_largest=True)
-    hits = index.search(np.asarray(face.embedding, dtype=np.float32), top=args.top)
-
-    if args.as_json:
-        print(json.dumps([hit.to_json() for hit in hits], indent=2))
-        return EXIT_OK
-
-    from sigil.verify import DEFAULT_MATCH_THRESHOLD, DEFAULT_REJECT_THRESHOLD
-
-    table = Table(title=f"Nearest faces in {args.corpus} ({len(index):,} vectors)")
-    table.add_column("#", justify="right")
-    table.add_column("Identity")
-    table.add_column("Distance", justify="right")
-    table.add_column("Gate")
-    for position, hit in enumerate(hits, start=1):
-        if hit.distance <= DEFAULT_MATCH_THRESHOLD:
-            gate = "[green]MATCH[/green]"
-        elif hit.distance >= DEFAULT_REJECT_THRESHOLD:
-            gate = "[red]NON_MATCH[/red]"
-        else:
-            gate = "[yellow]INCONCLUSIVE[/yellow]"
-        table.add_row(str(position), hit.label, f"{hit.distance:.4f}", gate)
-    console.print(table)
-    console.print(
-        "  [dim]Retrieval ranks; the same face gate still decides. A nearest neighbour "
-        "is not a match.[/dim]"
-    )
-    return EXIT_OK
-
-
 def cmd_preflight(args: argparse.Namespace, settings: Settings) -> int:
     results = run_preflight(settings, live=getattr(args, "live", False))
     if args.as_json:
@@ -631,46 +516,13 @@ def cmd_serve(args: argparse.Namespace, settings: Settings) -> int:
     return EXIT_OK
 
 
-def _cmd_benchmark_resolution(args: argparse.Namespace) -> int:
-    """Report every small-face treatment side by side, including when none of them win."""
-
-    from sigil.bench_resolution import run_resolution_benchmark
-
-    report = run_resolution_benchmark(
-        limit=args.limit or 200,
-        output=ROOT_DIR / "docs" / "benchmark-resolution.json",
-    )
-    if args.as_json:
-        print(json.dumps(report.to_json(), indent=2))
-        return EXIT_OK
-
-    table = Table(title="Small-face recovery, measured against a lanczos control")
-    table.add_column("Face size")
-    table.add_column("Treatment")
-    table.add_column("Decidable", justify="right")
-    table.add_column("TAR @ FMR 1e-2", justify="right")
-    table.add_column("Separation", justify="right")
-    for row in report.results:
-        tar, sep = row["tar_at_fmr_1e2"], row["separation"]
-        table.add_row(
-            f"{row['face_px']}px",
-            row["treatment"],
-            f"{row['decided']}/{row['pairs']}  ({row['coverage']:.0%})",
-            "not measurable" if tar != tar else f"{tar:.4f}",
-            "n/a" if sep != sep else f"{sep:.2f}",
-        )
-    console.print(table)
-    console.print(f"\n  [bold]{report.verdict}[/bold]")
-    for note in report.notes:
-        console.print(f"  [dim]{note}[/dim]")
-    return EXIT_OK
-
-
 def cmd_benchmark(args: argparse.Namespace, settings: Settings) -> int:
-    if getattr(args, "resolution", False):
-        return _cmd_benchmark_resolution(args)
+    from sigil.bench import run_benchmark, run_quality_calibration
 
-    from sigil.bench import run_benchmark
+    if args.quality_only:
+        payload = run_quality_calibration(prefer_coreml=not args.cpu, output=args.output)
+        print(json.dumps(payload, indent=2))
+        return EXIT_OK
 
     report = run_benchmark(limit=args.limit, prefer_coreml=not args.cpu, output=args.output)
     if args.as_json:
@@ -755,7 +607,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         "verify": cmd_verify,
         "anchor": cmd_anchor,
         "prove": cmd_prove,
-        "index": cmd_index,
         "preflight": cmd_preflight,
         "serve": cmd_serve,
         "benchmark": cmd_benchmark,

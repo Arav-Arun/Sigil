@@ -9,7 +9,7 @@ sigil verify --bundle docs/example-bundle
 
 That reads the Merkle root out of `merkle-proofs.json`, rebuilds it from `manifest.json`,
 and then reads the registry named in `receipt.json` over a public Sepolia endpoint. No
-`.env` is needed for either half. `verify.html` does the same thing in a browser from a
+`.env` is needed for either half. `sigil/static/verify.html` does the same thing in a browser from a
 `file://` URL, in an independent JavaScript implementation.
 
 Three files, and nothing else, on purpose:
@@ -27,3 +27,7 @@ stay local. The manifest records their SHA-256 digests, so verification reports
 present. Face embeddings appear in no bundle at all, ever.
 
 To see the media half, run the pipeline yourself and verify that bundle instead.
+
+This committed bundle is an immutable historical Sepolia proof. It was anchored by an
+earlier pipeline revision (so its recorded route label and calibrated threshold are kept
+as-is); new runs use the current bounded discovery flow and shipped thresholds.

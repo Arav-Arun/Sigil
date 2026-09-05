@@ -44,8 +44,10 @@ logger = logging.getLogger(__name__)
 MANIFEST_NAME = "manifest.json"
 PROOFS_NAME = "merkle-proofs.json"
 RECEIPT_NAME = "receipt.json"
+PENDING_NAME = "pending.json"
 CONTEXT_NAME = "context.json"
 SEARCH_DIR = "search"
+RESPONSES_NAME = "responses.json"
 MEDIA_DIR = "media"
 
 
@@ -61,20 +63,17 @@ class VerificationOutcome:
     root: str
     tamper: TamperReport
     artifact_failures: tuple[str, ...] = ()
-    chain_checked: bool = False
-    chain_ok: bool = False
-    chain_detail: str = ""
 
     def summary(self) -> str:
+        """Describe the offline result. The on-chain half is reported by the caller."""
+
         if self.ok:
-            return "PASS, evidence intact and anchored"
+            return "PASS, evidence intact"
         parts: list[str] = []
         if not self.tamper.ok:
             parts.append(self.tamper.summary())
         if self.artifact_failures:
             parts.append("artifact digest mismatch: " + ", ".join(self.artifact_failures))
-        if self.chain_checked and not self.chain_ok:
-            parts.append(self.chain_detail or "on-chain record missing")
         return "FAIL, " + "; ".join(parts)
 
 
@@ -91,12 +90,21 @@ def build_manifest(
     media_url: str,
     discovered_at: str,
     decision: dict[str, Any],
+    corroboration: dict[str, Any],
     configuration: dict[str, Any],
     model_id: str,
     pipeline_version: str,
     search_routes: list[str],
 ) -> dict[str, Any]:
-    """Assemble the deterministic section that gets hashed into the root."""
+    """Assemble the deterministic section that gets hashed into the root.
+
+    ``corroboration`` commits to the *set* of verified matches, not just the one that
+    ranked first. A single candidate that scraped past the threshold and three
+    independent photographs that cleared it comfortably are very different claims, and a
+    manifest that records only the winner cannot tell them apart. Anchoring the set means
+    the strength of the finding is part of what was sealed, so it cannot be quietly
+    restated afterwards as stronger than it was.
+    """
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -119,6 +127,7 @@ def build_manifest(
             "search_routes": sorted(search_routes),
         },
         "decision": decision,
+        "corroboration": corroboration,
     }
 
 
@@ -160,7 +169,7 @@ def write_bundle(
         )
     # This canonical aggregate is the exact byte sequence whose digest is committed
     # in the manifest. Per-route files remain for people inspecting the bundle.
-    (path / SEARCH_DIR / "responses.json").write_bytes(canonicalize(search_responses))
+    (path / SEARCH_DIR / RESPONSES_NAME).write_bytes(canonicalize(search_responses))
 
     # Context is explicitly outside the root: useful, but not part of the claim.
     (path / CONTEXT_NAME).write_text(
@@ -182,6 +191,43 @@ def attach_receipt(directory: str | Path, receipt: ChainReceipt) -> Path:
     path = Path(directory) / RECEIPT_NAME
     path.write_text(receipt.model_dump_json(indent=2), encoding="utf-8")
     return path
+
+
+def write_pending(directory: str | Path, transaction_hash: str, chain_id: int) -> Path:
+    """Record a submitted-but-unconfirmed anchor transaction.
+
+    Written when the chain accepted the transaction but it did not confirm in time. It
+    exists so the resume path waits for *that* transaction instead of signing a second
+    one for the same root, which is how a timeout turns into two anchors and a wasted
+    fee. Removed as soon as a receipt lands. Outside the Merkle root: operational
+    state, not part of the claim.
+    """
+
+    path = Path(directory) / PENDING_NAME
+    path.write_text(
+        json.dumps({"transaction_hash": transaction_hash, "chain_id": chain_id}, indent=2),
+        encoding="utf-8",
+    )
+    return path
+
+
+def load_pending(directory: str | Path) -> str:
+    """The pending transaction hash for this bundle, or empty if there is none."""
+
+    path = Path(directory) / PENDING_NAME
+    if not path.is_file():
+        return ""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    return str(data.get("transaction_hash") or "")
+
+
+def clear_pending(directory: str | Path) -> None:
+    """Drop the pending marker once the anchor is confirmed."""
+
+    (Path(directory) / PENDING_NAME).unlink(missing_ok=True)
 
 
 def load_manifest(directory: str | Path) -> dict[str, Any]:
@@ -256,35 +302,20 @@ def verify_bundle(
                             f"{name} (expected {expected[:12]}…, got {actual[:12]}…)"
                         )
 
+        # search/responses.json is the canonical aggregate whose digest the manifest
+        # commits to. The per-route files beside it are for humans and are not hashed.
+        # Manifest-only examples ship no search directory at all; once one exists,
+        # a missing aggregate is a deletion, not an omission.
         search_dir = path / SEARCH_DIR
-        if search_dir.is_dir():
+        aggregate = search_dir / RESPONSES_NAME
+        if search_dir.is_dir() and not aggregate.is_file():
+            artifact_failures.append(f"search responses ({RESPONSES_NAME} missing)")
+        elif aggregate.is_file():
             expected_search = digests.get("search_response")
-            aggregate = search_dir / "responses.json"
             try:
-                if aggregate.is_file():
-                    search_payload = json.loads(aggregate.read_text(encoding="utf-8"))
-                    actual_search = sha256_bytes(canonicalize(search_payload))
-                else:
-                    # Compatibility with bundles written before responses.json existed.
-                    context_path = path / CONTEXT_NAME
-                    context = (
-                        json.loads(context_path.read_text(encoding="utf-8"))
-                        if context_path.is_file()
-                        else {}
-                    )
-                    routes = context.get("routes_run", [])
-                    route_by_file = {
-                        route.replace(":", "_").replace("/", "_") + ".json": route
-                        for route in routes
-                    }
-                    legacy: dict[str, str] = {}
-                    for response_path in search_dir.glob("*.json"):
-                        route = route_by_file.get(response_path.name)
-                        if route:
-                            legacy[route] = str(
-                                json.loads(response_path.read_text(encoding="utf-8"))
-                            )
-                    actual_search = sha256_bytes(canonicalize(dict(sorted(legacy.items()))))
+                actual_search = sha256_bytes(
+                    canonicalize(json.loads(aggregate.read_text(encoding="utf-8")))
+                )
             except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError) as exc:
                 artifact_failures.append(f"search responses (unreadable: {exc})")
             else:
@@ -327,15 +358,20 @@ __all__ = [
     "CONTEXT_NAME",
     "MANIFEST_NAME",
     "MEDIA_DIR",
+    "PENDING_NAME",
     "PROOFS_NAME",
     "RECEIPT_NAME",
+    "RESPONSES_NAME",
     "SEARCH_DIR",
     "BundleError",
     "VerificationOutcome",
     "attach_receipt",
     "build_manifest",
+    "clear_pending",
     "load_manifest",
+    "load_pending",
     "load_proofs",
     "verify_bundle",
     "write_bundle",
+    "write_pending",
 ]

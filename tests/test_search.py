@@ -22,6 +22,7 @@ from sigil.search.normalize import (
     is_social_url,
     normalized_hostname,
 )
+from sigil.search.providers.serpapi import UploadedImage
 from sigil.search.quota import (
     DEFAULT_RESERVE,
     AccountStatus,
@@ -35,7 +36,6 @@ from sigil.search.routes import (
     parse_candidates,
     select_candidates,
 )
-from sigil.search.serpapi import UploadedImage
 
 NOW = datetime(2026, 9, 2, 12, 0, tzinfo=UTC)
 
@@ -357,7 +357,7 @@ class TestSelectCandidates:
         assert routes.count("R1:lens-all-full") == 3
         assert routes.count("R3:lens-all-face") == 3
 
-    def test_an_exact_result_is_retained_but_does_not_take_every_slot(self):
+    def test_provider_exact_hint_does_not_take_every_slot(self):
         candidates = [
             self._candidate(1, "R1:lens-all-full", exact=True),
             *[self._candidate(i, "R1:lens-all-full") for i in range(2, 10)],
@@ -366,7 +366,6 @@ class TestSelectCandidates:
 
         selected = select_candidates(candidates, 3)
 
-        assert selected[0].exact_match is True
         assert any("R3:lens-all-face" in candidate.search_routes for candidate in selected)
 
 
@@ -534,7 +533,7 @@ class TestSerpApiClient:
     def _client(self, responses, **kwargs):
         import requests
 
-        from sigil.search.serpapi import SerpApiClient
+        from sigil.search.providers.serpapi import SerpApiClient
 
         class FakeSession(requests.Session):
             def __init__(self):
@@ -558,14 +557,14 @@ class TestSerpApiClient:
         return response
 
     def test_rejects_an_empty_api_key(self):
-        from sigil.search.serpapi import SerpApiClient, WebSearchError
+        from sigil.search.providers.serpapi import SerpApiClient, WebSearchError
 
         with pytest.raises(WebSearchError) as info:
             SerpApiClient("")
         assert info.value.code is PipelineErrorCode.INVALID_CONFIGURATION
 
     def test_maps_401_to_a_configuration_error(self):
-        from sigil.search.serpapi import WebSearchError
+        from sigil.search.providers.serpapi import WebSearchError
 
         client, _ = self._client([self._response(401)])
         with pytest.raises(WebSearchError) as info:
@@ -573,7 +572,7 @@ class TestSerpApiClient:
         assert info.value.code is PipelineErrorCode.INVALID_CONFIGURATION
 
     def test_maps_402_to_search_unavailable(self):
-        from sigil.search.serpapi import WebSearchError
+        from sigil.search.providers.serpapi import WebSearchError
 
         client, _ = self._client([self._response(402)])
         with pytest.raises(WebSearchError) as info:
@@ -646,7 +645,7 @@ class TestSerpApiClient:
         assert len(session.calls) == 2
 
     def test_gives_up_after_exhausting_retries(self):
-        from sigil.search.serpapi import WebSearchError
+        from sigil.search.providers.serpapi import WebSearchError
 
         client, _ = self._client([self._response(503)] * 3, retries=2)
         with pytest.raises(WebSearchError) as info:

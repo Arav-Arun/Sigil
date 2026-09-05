@@ -3,7 +3,7 @@
   "version": "0.3.0",
   "private": true,
   "type": "module",
-  "description": "A face, sealed \u2014 on-chain evidence anchoring for Sigil",
+  "description": "On-chain evidence anchoring for Sigil",
   "scripts": {
     "compile": "hardhat compile",
     "test": "hardhat test",

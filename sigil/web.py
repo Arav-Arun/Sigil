@@ -69,7 +69,6 @@ STAGE_LABELS = {
     "search": "Searching the live web",
     "acquire": "Fetching candidate media",
     "verify": "Verifying identity",
-    "expand": "Looking for more posts of the same person",
     "evidence": "Building the evidence root",
     "report": "Rendering the report",
     "anchor": "Anchoring on-chain",
@@ -290,7 +289,7 @@ class SigilHandler(BaseHTTPRequestHandler):
             self._file(STATIC_DIR / "app.html")
             return
         if path == "/verify":
-            self._file(Path(__file__).resolve().parent.parent / "verify.html")
+            self._file(STATIC_DIR / "verify.html")
             return
         if path == "/api/config":
             summary = self.settings.redacted_summary()

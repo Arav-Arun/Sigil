@@ -8,7 +8,7 @@ from typing import Annotated, Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 Confidence = Annotated[float, Field(ge=0.0, le=1.0)]
 NonNegativeFloat = Annotated[float, Field(ge=0.0)]
@@ -92,6 +92,9 @@ class SearchCandidate(StrictModel):
     # The source site's own icon, as reported by the search provider.
     favicon_url: HttpUrl | None = None
     search_rank: int = Field(ge=1)
+    # A discovery hint: the search provider put this URL in its exact-image result
+    # bucket. It is never proof that the media we downloaded is the submitted image;
+    # that stricter conclusion is recorded as CandidateVerification.same_photo.
     exact_match: bool = False
     discovered_at: datetime
     search_routes: list[str] = Field(default_factory=list)

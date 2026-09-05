@@ -31,6 +31,9 @@ types/ethers-contracts/
 # Pipeline outputs (keep directory via .gitkeep)
 data/outputs/*
 !data/outputs/.gitkeep
+# Faces of real people are committed nowhere in this repository: a clone starts with no
+# tiles and the UI says so. A face published to a public repo cannot be retracted, and it
+# is not ours to publish. Drop your own images in and they become one-click demos.
 data/samples/*
 !data/samples/.gitkeep
 
@@ -57,12 +60,6 @@ data/bundles/
 *.onnx
 scikit_learn_data/
 
-# Source photos for the sample tiles. Faces of real people are not committed anywhere in
-# this repository: `data/samples/*` is ignored too, so a clone starts with no tiles and the
-# UI says so. A face published to a public repo cannot be retracted, and it is not ours to
-# publish. Drop your own images into data/samples/ and they appear as one-click demos.
-headshots/
-data/index/
-
-# macOS
-.DS_Store
+# Vercel
+.vercel/
+public/

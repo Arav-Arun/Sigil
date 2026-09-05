@@ -24,7 +24,7 @@ from typing import Any
 
 import numpy as np
 
-from sigil.face import FaceEngine, cosine_distance, get_engine
+from sigil.face import FaceEngine, cosine_distance, embed_all_faces, get_engine
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +60,52 @@ class LatencyStats:
         )
 
 
+# Face sizes the resolution sweep simulates, as fractions of the LFW image. Downscaling
+# the whole image and re-detecting is what actually happens to a search-provider
+# thumbnail, so it measures the deployed failure mode rather than a synthetic blur.
+RESOLUTION_SCALES = (0.30, 0.40, 0.55, 0.75, 1.00)
+
+# Bands the measured size penalty is quantised into. Three is enough to capture the
+# shape and few enough that each one is backed by hundreds of pairs rather than tens.
+SIZE_BANDS = (64, 96)
+
+
+@dataclass(slots=True)
+class ResolutionBand:
+    """How the distance distribution moves when the candidate face is small."""
+
+    scale: float = 0.0
+    face_px_median: int = 0
+    pairs: int = 0
+    detection_failures: int = 0
+    genuine_p97: float = 0.0
+    impostor_min: float = 0.0
+    impostor_fmr_1e2: float = 0.0
+    # How much closer impostors get at this size than at full resolution. Positive means
+    # the boundary has to move down by this much to hold the same false-match rate.
+    impostor_shift: float = 0.0
+
+
+@dataclass(slots=True)
+class SamePhotoCalibration:
+    """Separation between a re-encoded copy of one photo and a different photo.
+
+    The pipeline has to tell "the image you uploaded, served back as a JPEG thumbnail"
+    apart from "a different photograph of the same person". The second is the useful
+    discovery; only the first is a repost. Both are near-duplicates to a human, so the
+    thresholds that separate them are worth measuring rather than guessing.
+    """
+
+    same_pairs: int = 0
+    different_pairs: int = 0
+    same_mean_error_p99: float = 0.0
+    different_mean_error_min: float = 0.0
+    same_dhash_p99: float = 0.0
+    different_dhash_min: float = 0.0
+    chosen_mean_error: float = 0.0
+    chosen_dhash: float = 0.0
+
+
 @dataclass(slots=True)
 class BenchmarkReport:
     """Everything needed to reproduce and audit an accuracy claim."""
@@ -90,6 +136,11 @@ class BenchmarkReport:
     negative_mean: float = 0.0
     detect_latency: LatencyStats = field(default_factory=LatencyStats)
     embed_latency: LatencyStats = field(default_factory=LatencyStats)
+    resolution: list[ResolutionBand] = field(default_factory=list)
+    # Measured penalty to subtract from the match threshold, keyed by the smallest face
+    # size the band covers. Consumed by sigil.verify, and pinned there by a test.
+    size_penalties: dict[str, float] = field(default_factory=dict)
+    same_photo: SamePhotoCalibration = field(default_factory=SamePhotoCalibration)
     notes: list[str] = field(default_factory=list)
 
     def to_json(self) -> dict[str, Any]:
@@ -214,6 +265,233 @@ def _eer(positives: list[float], negatives: list[float]) -> float:
     return best_value
 
 
+def measure_resolution(
+    pairs: np.ndarray,
+    targets: np.ndarray,
+    engine: FaceEngine,
+    *,
+    limit: int = 250,
+) -> list[ResolutionBand]:
+    """Measure how face size moves the genuine and impostor distance distributions.
+
+    The whole image is downscaled and re-detected, which is what a search-provider
+    thumbnail actually is, and the production ``embed_all_faces`` path runs so the
+    small-face recovery is included in the measurement rather than around it.
+
+    This exists because the operating point was chosen on full-resolution pairs and then
+    applied to 112px thumbnails, and a real run matched a stranger at 0.6888 on one.
+    """
+
+    from PIL import Image
+
+    step = max(1, len(pairs) // limit)
+    indices = list(range(0, len(pairs), step))[:limit]
+    bands: list[ResolutionBand] = []
+
+    for scale in RESOLUTION_SCALES:
+        positives: list[float] = []
+        negatives: list[float] = []
+        face_px: list[int] = []
+        failures = 0
+
+        for index in indices:
+            embeddings: list[np.ndarray] = []
+            for side in (0, 1):
+                image = _as_uint8(pairs[index, side])
+                if scale < 1.0:
+                    height, width = image.shape[:2]
+                    small = Image.fromarray(image).resize(
+                        (max(1, int(width * scale)), max(1, int(height * scale))),
+                        Image.Resampling.LANCZOS,
+                    )
+                    image = np.asarray(small, dtype=np.uint8)
+                faces, vectors, _ = embed_all_faces(image, engine=engine, min_face_px=0)
+                if not faces:
+                    break
+                best = int(np.argmax([f.width * f.height for f in faces]))
+                face_px.append(int(min(faces[best].width, faces[best].height)))
+                embeddings.append(vectors[best])
+
+            if len(embeddings) != 2:
+                failures += 1
+                continue
+            distance = cosine_distance(embeddings[0], embeddings[1])
+            (positives if targets[index] == 1 else negatives).append(distance)
+
+        band = ResolutionBand(
+            scale=scale,
+            face_px_median=int(statistics.median(face_px)) if face_px else 0,
+            pairs=len(positives) + len(negatives),
+            detection_failures=failures,
+            genuine_p97=round(float(np.quantile(positives, 0.97)), 5) if positives else 0.0,
+            impostor_min=round(min(negatives), 5) if negatives else 0.0,
+            impostor_fmr_1e2=round(threshold_at_fmr(negatives, REPORTING_FMR), 5)
+            if negatives
+            else 0.0,
+        )
+        bands.append(band)
+        logger.info(
+            "resolution %.2f: %d px median face, %d pairs, impostor min %.4f",
+            scale,
+            band.face_px_median,
+            band.pairs,
+            band.impostor_min,
+        )
+
+    # Full resolution is the reference the shipped threshold was chosen against.
+    reference = next((b for b in bands if b.scale == 1.0), None)
+    if reference:
+        for band in bands:
+            band.impostor_shift = round(max(0.0, reference.impostor_min - band.impostor_min), 5)
+    return bands
+
+
+# Below this, a measured impostor shift is indistinguishable from sampling noise: each
+# resolution band holds only ~125 impostor pairs, and the minimum of 125 samples is a
+# high-variance statistic. Reporting a penalty smaller than this would dress noise up as
+# a calibrated constant, which is the exact failure this module exists to prevent.
+PENALTY_NOISE_FLOOR = 0.01
+
+
+def size_penalties(bands: list[ResolutionBand]) -> dict[str, float]:
+    """Quantise the measured impostor shift into the bands sigil.verify applies.
+
+    A penalty is the amount the match threshold must come *down* by at that face size to
+    keep the same distance to the nearest impostor that full resolution has. Bands are
+    keyed by their lower edge in pixels; anything above the largest key is unpenalised.
+
+    Shifts below PENALTY_NOISE_FLOOR are reported as zero rather than as small numbers.
+    """
+
+    penalties: dict[str, float] = {}
+    for edge in SIZE_BANDS:
+        covered = [b for b in bands if b.face_px_median and b.face_px_median < edge]
+        # The worst band at or below this size sets the penalty: a threshold must be safe
+        # across the whole band, not on its average.
+        penalties[str(edge)] = round(max((b.impostor_shift for b in covered), default=0.0), 3)
+    # Monotonic: a smaller face can never be given a gentler penalty than a larger one.
+    running = 0.0
+    for edge in sorted((int(k) for k in penalties), reverse=True):
+        running = max(running, penalties[str(edge)])
+        penalties[str(edge)] = running if running >= PENALTY_NOISE_FLOOR else 0.0
+    return penalties
+
+
+def measure_same_photo(pairs: np.ndarray, *, limit: int = 300) -> SamePhotoCalibration:
+    """Calibrate the repost test: one photo re-encoded, versus a different photograph.
+
+    Positives are the same pixels after the transforms a search index actually applies,
+    JPEG recompression and downscaling. Negatives are LFW's own pairs, so they include
+    *the same person photographed twice*, which is the case the test must not swallow.
+    """
+
+    import io
+
+    from PIL import Image
+
+    from sigil.verify import photo_difference
+
+    step = max(1, len(pairs) // limit)
+    indices = list(range(0, len(pairs), step))[:limit]
+
+    same_mean: list[float] = []
+    same_dhash: list[float] = []
+    diff_mean: list[float] = []
+    diff_dhash: list[float] = []
+
+    for index in indices:
+        source = Image.fromarray(_as_uint8(pairs[index, 0])).convert("RGB")
+        other = Image.fromarray(_as_uint8(pairs[index, 1])).convert("RGB")
+
+        for quality, factor in ((30, 1.0), (60, 0.5), (85, 0.25), (95, 1.0)):
+            buffer = io.BytesIO()
+            variant = source
+            if factor < 1.0:
+                variant = source.resize(
+                    (max(1, int(source.width * factor)), max(1, int(source.height * factor))),
+                    Image.Resampling.LANCZOS,
+                )
+            variant.save(buffer, format="JPEG", quality=quality)
+            with Image.open(io.BytesIO(buffer.getvalue())) as decoded:
+                mean_error, dhash_error = photo_difference(source, decoded.convert("RGB"))
+            same_mean.append(mean_error)
+            same_dhash.append(dhash_error)
+
+        mean_error, dhash_error = photo_difference(source, other)
+        diff_mean.append(mean_error)
+        diff_dhash.append(dhash_error)
+
+    def q99(values: list[float]) -> float:
+        return round(float(np.quantile(values, 0.99)), 4) if values else 0.0
+
+    calibration = SamePhotoCalibration(
+        same_pairs=len(same_mean),
+        different_pairs=len(diff_mean),
+        same_mean_error_p99=q99(same_mean),
+        different_mean_error_min=round(min(diff_mean), 4) if diff_mean else 0.0,
+        same_dhash_p99=q99(same_dhash),
+        different_dhash_min=round(min(diff_dhash), 4) if diff_dhash else 0.0,
+    )
+    # Sit above the same-photo tail and below the closest different photo. When the two
+    # overlap, prefer the same-photo side: calling a repost "a distinct photo" costs a
+    # duplicate in the grid, while the reverse hides a genuine second photograph.
+    calibration.chosen_mean_error = round(
+        min(
+            calibration.same_mean_error_p99 * 1.2,
+            max(calibration.same_mean_error_p99, calibration.different_mean_error_min * 0.5),
+        ),
+        3,
+    )
+    calibration.chosen_dhash = round(
+        min(
+            calibration.same_dhash_p99 * 1.2,
+            max(calibration.same_dhash_p99, calibration.different_dhash_min * 0.5),
+        ),
+        3,
+    )
+    return calibration
+
+
+def run_quality_calibration(
+    *, prefer_coreml: bool = True, output: Path | None = None
+) -> dict[str, Any]:
+    """Measure only the resolution sweep and the repost test, and merge them in.
+
+    The accuracy figures in `docs/benchmark.json` come from a full LFW run that takes
+    tens of minutes. These two sections do not, and re-running everything to refresh
+    them would invite exactly the failure the full run guards against: a partial
+    measurement replacing a complete one. So this merges into the committed report and
+    refuses to invent the sections it did not measure.
+    """
+
+    try:
+        from sklearn.datasets import fetch_lfw_pairs
+    except ImportError as exc:  # pragma: no cover - optional extra
+        raise RuntimeError("benchmarking needs scikit-learn: uv sync --extra bench") from exc
+
+    engine = get_engine(prefer_coreml=prefer_coreml)
+    engine.warm_up()
+    split = fetch_lfw_pairs(subset="test", color=True, resize=1.0, funneled=True, slice_=None)
+
+    bands = measure_resolution(split.pairs, split.target, engine)
+    payload = {
+        "resolution": [asdict(band) for band in bands],
+        "size_penalties": size_penalties(bands),
+        "same_photo": asdict(measure_same_photo(split.pairs)),
+    }
+
+    if output:
+        if not output.is_file():
+            raise RuntimeError(
+                f"{output} does not exist; run a full `sigil benchmark` before calibrating"
+            )
+        existing = json.loads(output.read_text(encoding="utf-8"))
+        existing.update(payload)
+        output.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+        logger.info("quality calibration merged into %s", output)
+    return payload
+
+
 def run_benchmark(
     *,
     limit: int | None = None,
@@ -301,6 +579,12 @@ def run_benchmark(
 
     report.detect_latency = LatencyStats.of(detect_ms)
     report.embed_latency = LatencyStats.of(embed_ms)
+
+    logger.info("measuring the resolution sweep")
+    report.resolution = measure_resolution(test.pairs, test.target, engine)
+    report.size_penalties = size_penalties(report.resolution)
+    logger.info("calibrating the repost test")
+    report.same_photo = measure_same_photo(test.pairs)
     report.notes = [
         f"Thresholds calibrated on {report.calibration_pairs} pairs "
         f"(LFW train + 10_folds) at FMR<={TARGET_FMR}.",
@@ -340,4 +624,16 @@ def run_benchmark(
     return report
 
 
-__all__ = ["BenchmarkReport", "LatencyStats", "run_benchmark", "threshold_at_fmr"]
+__all__ = [
+    "PENALTY_NOISE_FLOOR",
+    "BenchmarkReport",
+    "LatencyStats",
+    "ResolutionBand",
+    "SamePhotoCalibration",
+    "measure_resolution",
+    "measure_same_photo",
+    "run_benchmark",
+    "run_quality_calibration",
+    "size_penalties",
+    "threshold_at_fmr",
+]

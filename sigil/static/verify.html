@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sigil, independent verifier</title>
+<title>Sigil — Check a result</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -56,7 +56,18 @@
               border-bottom:2px solid transparent; text-decoration:none; }
   .navmid a:hover { color:var(--indigo); text-decoration:none; }
   .navmid a.on { color:var(--purple); border-bottom-color:var(--purple); }
-  @media (max-width:900px) { .navmid { display:none; } }
+  /* Same rule as app.html: shrink the links, never hide them. This page is reachable
+     only through that nav, so hiding it on a phone strands the visitor. */
+  @media (max-width:900px) {
+    nav { grid-template-columns:auto 1fr; padding:0 14px; gap:10px; }
+    .navmid { justify-self:end; gap:18px; }
+    .navmid a { font-size:14.5px; }
+  }
+  @media (max-width:560px) {
+    .brand span { display:none; }
+    .navmid { gap:14px; }
+    .navmid a { font-size:14px; }
+  }
 
   .wrap { max-width:860px; margin:0 auto; padding:48px 24px 80px; }
   h1 { font:700 40px/1.2 "Noto Sans", sans-serif; color:var(--ink); margin:0 0 6px;
@@ -89,6 +100,21 @@
   }
   input[type=text]:focus { outline:none; border-color:var(--indigo); }
 
+  /* Advanced chain settings. Full width and a slightly smaller face, so a long endpoint
+     URL is readable end to end instead of being clipped by its own input. */
+  .adv { margin:6px 0 4px; }
+  .adv summary { cursor:pointer; color:var(--purple-soft); font-size:14px; padding:4px 0; }
+  .adv summary:hover { color:var(--indigo); }
+  .fld { display:block; margin-top:12px; }
+  .fld > span { display:block; margin-bottom:5px; font-size:13px; font-weight:600;
+                color:var(--purple); }
+  /* Proportional, not monospace: measured on a 375px screen, the endpoint URL and a full
+     42-character address both fit the box proportionally at 12.5px, and neither fits in
+     a monospace face at any readable size. A value the user cannot see in full is worse
+     than one that is a half-point smaller. */
+  .fld input[type=text] { width:100%; min-width:0; flex:none; font-size:13.5px; }
+  @media (max-width:560px) { .fld input[type=text] { font-size:12.5px; } }
+
   .card { background:var(--white); border:1px solid var(--line); border-radius:12px;
           padding:20px 22px; margin:16px 0; box-shadow:var(--shadow-sm); }
   .verdict { font:700 20px/1.3 "Noto Sans", sans-serif; color:var(--ink);
@@ -113,6 +139,10 @@
   details { margin-top:12px; }
   summary { cursor:pointer; color:var(--purple-soft); font-size:14px; }
   .hint { font-size:13px; color:var(--purple-soft); margin-top:6px; }
+  .site-footer a { font-weight:700; color:inherit; text-decoration:none; }
+  .site-footer a:hover { color:var(--indigo); text-decoration:none; }
+  .site-footer { padding:28px 24px 36px; border-top:1px solid var(--line); background:var(--white);
+                 text-align:center; color:var(--purple-soft); font-size:13.5px; }
 </style>
 </head>
 <body>
@@ -123,48 +153,65 @@
       <circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="3.4"></circle>
       <path d="M12 3v3M12 18v3M3 12h3M18 12h3"></path>
     </svg>
-    Sigil
+    <span>Sigil</span>
   </a>
   <div class="navmid">
-    <a href="/">Face Search</a>
+    <a href="/" data-app-only>Face Search</a>
     <a class="on" href="/verify">Verify Evidence</a>
-    <a href="/#how">How it works</a>
+    <a href="/#how" data-app-only>How it works</a>
   </div>
-  <div></div>
 </nav>
 
 <div class="wrap">
 
-  <h1>Sigil, independent verifier</h1>
-  <p class="tag">A face, sealed.</p>
+  <h1>Check a result</h1>
   <p class="lede">
-    This page re-implements Sigil's canonicalization and Merkle construction in JavaScript
-    and checks an evidence bundle <strong>from scratch</strong>, it does not trust the
-    Python that produced it. Everything runs locally in your browser: no upload, no server,
-    no install. Open it from a <span class="mono">file://</span> URL if you like.
+    Drop in a result folder and this page tells you whether anything in it has been
+    changed since it was recorded, and if so, exactly what. It rebuilds the fingerprint
+    from the files themselves rather than trusting what they claim, then compares it with
+    the blockchain record.
+  </p>
+  <p class="lede">
+    Everything happens in your browser. Nothing is uploaded, no account is needed, and the
+    page works offline from a file on your computer.
   </p>
 
   <div class="drop" id="drop">
-    <p><strong>Drop a bundle folder here</strong></p>
+    <p><strong>Drop a result folder here</strong></p>
     <p class="muted">or</p>
     <div class="row" style="justify-content:center">
       <label class="btn">Choose folder<input type="file" id="dir" webkitdirectory directory hidden></label>
       <label class="btn">Choose files<input type="file" id="files" multiple hidden></label>
     </div>
-    <p class="hint">Needs <span class="mono">manifest.json</span> and <span class="mono">merkle-proofs.json</span>.
-       Media files are checked too when present.</p>
+    <p class="hint">Any folder produced by a run. Photos in it are checked too when present.</p>
   </div>
 
   <div class="row">
-    <input type="text" id="rpc" value="https://ethereum-sepolia-rpc.publicnode.com" spellcheck="false">
-    <input type="text" id="contract" placeholder="0x… contract address" spellcheck="false">
     <button id="chain" disabled>Check on-chain</button>
+    <span class="hint" id="prefill"></span>
   </div>
-  <p class="hint">The on-chain step is optional, local verification already proves the evidence is intact.</p>
-  <p class="hint" id="prefill"></p>
+
+  <!-- Both fields have working defaults: the endpoint is public and the registry address
+       is read from the folder itself. Shown as two bare inputs they were the loudest
+       thing on the page, and the endpoint URL did not even fit its own box on a phone. -->
+  <details class="adv">
+    <summary>Use a different endpoint or registry</summary>
+    <label class="fld">
+      <span>Ethereum RPC endpoint</span>
+      <input type="text" id="rpc" value="https://ethereum-sepolia-rpc.publicnode.com"
+             spellcheck="false" autocapitalize="off" autocorrect="off">
+    </label>
+    <label class="fld">
+      <span>Registry contract address</span>
+      <input type="text" id="contract" placeholder="0x… contract address"
+             spellcheck="false" autocapitalize="off" autocorrect="off">
+    </label>
+  </details>
 
   <div id="out"></div>
 </div>
+
+<footer class="site-footer">Made by Team <a href="https://aravarun.in" target="_blank" rel="noopener noreferrer">Deploy For Good</a> for <a href="https://hhgoa.com" target="_blank" rel="noopener noreferrer">Hacker House Goa</a> Task 3</footer>
 
 <script>
 "use strict";
@@ -457,6 +504,44 @@ const esc = s => String(s).replace(/[&<>"']/g, c =>
 // fails the build if this line ever drifts from the contract.
 const VERIFY_SELECTOR = "0x75e36616";
 
+// SHA-256 of SigilRegistry's deployed runtime bytecode, copied from
+// deployments/sepolia.json. tests/test_verify.py fails the build if the two drift.
+//
+// Without this, the page proves only that *some* contract answered "yes". A contract
+// with the same ABI can return true for every root, and the address is read out of the
+// bundle's own receipt.json, so a forged bundle could point this page straight at one.
+// Hashing the deployed code is what makes the answer come from the registry.
+const REGISTRY_CODE_SHA256 =
+  "c5708dce1ff244cd0b30fc735943fbb495f5c279c98674255f0615ed2050133e";
+
+async function rpcCall(rpc, method, params) {
+  const res = await fetch(rpc, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+  });
+  const json = await res.json();
+  if (json.error) throw new Error(json.error.message);
+  return json.result;
+}
+
+async function sha256Hex(hex) {
+  const bytes = new Uint8Array(
+    (hex.replace(/^0x/, "").match(/../g) || []).map(b => parseInt(b, 16))
+  );
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Is the code at `contract` the registry this repository deployed? */
+async function checkRegistryIdentity(rpc, contract) {
+  const code = await rpcCall(rpc, "eth_getCode", [contract, "latest"]);
+  if (!code || code === "0x") return { ok: false, detail: "no contract code at that address" };
+  const digest = await sha256Hex(code);
+  return digest === REGISTRY_CODE_SHA256
+    ? { ok: true, detail: `runtime bytecode matches SigilRegistry (${digest.slice(0, 12)}…)` }
+    : { ok: false, detail: `not SigilRegistry: deployed code hashes to ${digest.slice(0, 12)}…` };
+}
+
 async function checkChain() {
   const box = document.getElementById("chainout");
   const rpc = document.getElementById("rpc").value.trim();
@@ -474,15 +559,19 @@ async function checkChain() {
 
   const data = VERIFY_SELECTOR + LAST.root.replace(/^0x/, "").padStart(64, "0");
   try {
-    const res = await fetch(rpc, {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call",
-                             params: [{ to: contract, data }, "latest"] }),
-    });
-    const json = await res.json();
-    if (json.error) throw new Error(json.error.message);
+    // Identity first. An answer from the wrong contract is worse than no answer,
+    // because it looks like a pass.
+    const identity = await checkRegistryIdentity(rpc, contract);
+    if (!identity.ok) {
+      box.innerHTML = `<div class="card">
+        <div class="verdict bad">✗ Not the Sigil registry</div>
+        <p class="muted">${esc(identity.detail)}. Refusing to report this as verified.</p>
+      </div>`;
+      return;
+    }
 
-    const raw = (json.result || "").replace(/^0x/, "");
+    const raw = ((await rpcCall(rpc, "eth_call", [{ to: contract, data }, "latest"])) || "")
+      .replace(/^0x/, "");
     if (raw.length < 256) throw new Error("unexpected response from the contract");
 
     const word = i => raw.slice(i * 64, (i + 1) * 64);
@@ -499,6 +588,7 @@ async function checkChain() {
         <tr><th>Submitter</th><td class="mono">${submitter}</td></tr>
         <tr><th>Anchored at</th><td>${new Date(anchoredAt * 1000).toISOString()}</td></tr>
         <tr><th>Schema version</th><td>${schema}</td></tr>
+        <tr><th>Registry</th><td class="ok">${esc(identity.detail)}</td></tr>
       </table>
       <p class="muted">Read with a plain <span class="mono">eth_call</span>, no wallet,
          no private key. That is what makes it a proof.</p>${explorerLink}` : ""}
@@ -585,6 +675,18 @@ function readDir(entry) {
 document.getElementById("dir").addEventListener("change", e => verify([...e.target.files]));
 document.getElementById("files").addEventListener("change", e => verify([...e.target.files]));
 document.getElementById("chain").addEventListener("click", checkChain);
+
+/* This page is also published on its own, without the local face-search app behind it,
+   because checking a result should not require installing the thing that produced it.
+   In that deployment the links to the app point at routes that do not exist, so they are
+   removed rather than left to 404. The probe fails closed: from a file:// URL fetch
+   rejects outright, which is also a context where the app is not there. */
+fetch("/api/config", { method: "GET" })
+  .then(res => { if (!res.ok) throw new Error("no app"); })
+  .catch(() => {
+    document.querySelectorAll("[data-app-only]").forEach(el => el.remove());
+    document.querySelector(".brand").setAttribute("href", "/");
+  });
 </script>
 </body>
 </html>

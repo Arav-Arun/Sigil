@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "sigil"
 version = "0.3.0"
-description = "A face, sealed. Find a face on the public web and anchor the evidence on-chain."
+description = "Find a face on the public web and anchor the evidence on-chain."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = { text = "MIT" }

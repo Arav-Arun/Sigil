@@ -8,14 +8,15 @@ decision at the provider, not a quality problem.
 
 So discovery fans out across sources that fail differently:
 
-============ ============================================= ==================
-Source        What it is good at                            Needs
-============ ============================================= ==================
-``lens``      the visual index: this exact photo, republished SERPAPI_KEY
-``serpweb``   site-restricted keyword search on a name       SERPAPI_KEY
-``exa``       neural retrieval; finds pages *about* a person  EXA_API_KEY
-``wikidata``  structured, curated portraits of public figures nothing
-============ ============================================= ==================
+=========== ================================================ =============
+Module       What it is good at                               Needs
+=========== ================================================ =============
+``serpapi``  Google Lens visual matches, and site-restricted   SERPAPI_KEY
+             keyword search once a name has been inferred
+``exa``      neural retrieval; finds pages *about* a person    EXA_API_KEY
+``wikidata`` structured, curated portraits of public figures   nothing
+``pages``    extra photographs on a result page already found  nothing
+=========== ================================================ =============
 
 Every source returns :class:`~sigil.models.SearchCandidate` objects and nothing more.
 None of them decides identity. They decide what gets *looked at*; the face gate in

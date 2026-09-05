@@ -9,11 +9,6 @@ Two capabilities are used:
 
 ``/search``  neural retrieval, optionally restricted to the social allowlist.
 
-``/findSimilar`` was tried here and removed. Asked for pages like a YouTube watch URL it
-returned a property listing, a git repository and a video site, because a watch page
-carries almost no crawlable text to be similar *to*. The expansion round in
-:mod:`sigil.run` searches a face-confirmed name instead, which works.
-
 Exa also returns page images alongside results, so candidates arrive with media already
 attached instead of needing a second fetch to discover an ``og:image``. That is a latency
 win, not just a convenience.
@@ -44,7 +39,6 @@ from sigil.search.providers.base import ProviderResult
 logger = logging.getLogger(__name__)
 
 EXA_SEARCH = "https://api.exa.ai/search"
-EXA_SIMILAR = "https://api.exa.ai/findSimilar"
 
 DEFAULT_RESULTS = 15
 
@@ -93,8 +87,7 @@ class ExaProvider:
                 continue
             # `.get("imageLinks", [None])[0]` looks safe and is not: when the key exists
             # but holds an empty list, the default never applies and the subscript raises.
-            # Exa returns exactly that for pages it found no image on, which is most of
-            # them, so the whole expansion round died on its first result.
+            # Exa returns empty image lists for many pages, so handle that shape explicitly.
             links = (item.get("extras") or {}).get("imageLinks") or []
             image = item.get("image") or (links[0] if links else None)
             if not image:

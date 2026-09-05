@@ -5,6 +5,10 @@ import { configVariable, defineConfig } from "hardhat/config";
 
 export default defineConfig({
   plugins: [hardhatToolboxMochaEthersPlugin],
+  // One tests/ tree for the whole project; the Solidity suite lives beside the Python one.
+  paths: {
+    tests: { mocha: "tests/contracts" },
+  },
   solidity: {
     profiles: {
       default: {

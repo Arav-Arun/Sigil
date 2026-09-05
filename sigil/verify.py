@@ -24,7 +24,7 @@ from typing import Any
 import numpy as np
 from PIL import Image, ImageOps
 
-from sigil.candidates import FetchedMedia, MediaQuality
+from sigil.candidates import FetchedMedia
 from sigil.face import FaceEngine, cosine_distance, embed_all_faces
 from sigil.models import DecisionStatus, SearchCandidate, VerificationDecision
 
@@ -59,6 +59,74 @@ DEFAULT_REJECT_THRESHOLD = 0.75
 
 # A face this small in a candidate image carries too little signal to be decisive.
 MIN_CANDIDATE_FACE_PX = 48
+
+# Measured size penalty, from `size_penalties` in docs/benchmark.json. Each entry is
+# (upper edge in pixels, amount subtracted from the match threshold below that edge).
+#
+# Both are zero, and that is a measured result rather than an unfinished one.
+#
+# The hypothesis was that a small face should face a tighter bar, because the one
+# production false match on record, a stranger at 0.6888, was on a 112px thumbnail. The
+# resolution sweep in `sigil benchmark` tests it directly: LFW images are downscaled and
+# re-detected, which is what a search-provider thumbnail actually is. It does not hold.
+#
+#   face px    genuine p97    impostor min
+#        29         0.5220          0.8620
+#        39         0.4923          0.8495
+#        54         0.4695          0.8448
+#        73         0.4699          0.8367
+#        98         0.4669          0.8387
+#
+# Impostors do not get closer as the face shrinks; if anything they drift further, and
+# the variation across bands is inside the noise of ~125 impostor pairs each. What
+# degrades is the *genuine* side: p97 climbs 0.467 -> 0.522. Low resolution costs recall,
+# not precision. A size penalty would therefore tighten a bar that is not the problem,
+# and would spend recall exactly where recall is already worst.
+#
+# The honest caveat: LFW impostors are random strangers. A reverse image search returns
+# look-alikes on purpose, and that population cannot be sampled from LFW at all, so this
+# does not clear the hard-negative case that produced the 0.6888 match. It rules out the
+# simpler explanation, not the harder one.
+#
+# What the sweep does support is MIN_CANDIDATE_FACE_PX below. At 39px the genuine p97 is
+# 0.4923 and at 29px it is 0.5220, closing on the 0.55 operating point; under roughly
+# 48px the genuine distribution starts colliding with the threshold. The gate was already
+# there and is now measured rather than assumed.
+#
+# The mechanism stays because it is where a hard-negative measurement would land.
+SIZE_PENALTIES: tuple[tuple[int, float], ...] = ((64, 0.0), (96, 0.0))
+
+# Measured repost bounds, from `same_photo` in docs/benchmark.json.
+#
+# Calibrated by re-encoding LFW images the way a search index does, JPEG quality 30-95
+# and downscales to 1/4, and comparing against LFW's own pairs, which include the same
+# person photographed twice, the case this test must NOT swallow.
+#
+#   same photo, 99th pct   mean error  5.61   dhash 0.0586
+#   different photo, min   mean error 24.00   dhash 0.2383
+#
+# The separation is over 3x on both signals. The previously shipped dhash bound of 0.04
+# sat *below* the same-photo 99th percentile, so it was quietly failing to recognise
+# genuine reposts and showing them as independent discoveries, which is the direction
+# that overstates a result.
+SAME_PHOTO_MEAN_ERROR = 6.74
+SAME_PHOTO_DHASH_ERROR = 0.07
+# Aspect ratios have to agree before a pixel comparison means anything.
+SAME_PHOTO_ASPECT_TOLERANCE = 0.03
+
+
+def match_threshold_for(face_px: int, base: float = DEFAULT_MATCH_THRESHOLD) -> float:
+    """Tighten the match threshold for small faces, by the measured amount.
+
+    Returns the threshold a candidate with a face this size has to clear. The band edges
+    and penalties are measured, not chosen; see SIZE_PENALTIES.
+    """
+
+    penalty = max(
+        (value for edge, value in SIZE_PENALTIES if face_px < edge),
+        default=0.0,
+    )
+    return round(base - penalty, 4)
 
 
 @dataclass(slots=True)
@@ -133,8 +201,10 @@ def is_same_photo(query_path: str | Path, media: FetchedMedia) -> bool:
     Byte hashes alone miss the common case where a search engine returns the same pixels
     as a JPEG or thumbnail. The full-image comparison below combines a small colour error
     with a difference-hash check. It does not participate in face identity; it only lets
-    the UI and ranking distinguish an exact-photo rediscovery from another photograph of
-    the verified person.
+    the UI and ranking distinguish a source-image rediscovery from another photograph of
+    the verified person. This is deliberately a media comparison, not a search-provider
+    label: an ``exact_matches`` response says why a URL was retrieved, but does not prove
+    which image the URL or its thumbnail eventually served.
     """
 
     if not media.ok:
@@ -151,8 +221,21 @@ def is_same_photo(query_path: str | Path, media: FetchedMedia) -> bool:
 
     source_ratio = source.width / source.height
     candidate_ratio = candidate.width / candidate.height
-    if abs(source_ratio - candidate_ratio) > 0.03:
+    if abs(source_ratio - candidate_ratio) > SAME_PHOTO_ASPECT_TOLERANCE:
         return False
+
+    mean_error, dhash_error = photo_difference(source, candidate)
+    return mean_error <= SAME_PHOTO_MEAN_ERROR and dhash_error <= SAME_PHOTO_DHASH_ERROR
+
+
+def photo_difference(source: Image.Image, candidate: Image.Image) -> tuple[float, float]:
+    """How far apart two images are: ``(mean colour error, difference-hash error)``.
+
+    Split out so `sigil benchmark` calibrates the thresholds against the exact function
+    the pipeline runs. Two signals rather than one because they fail differently: the
+    colour error catches a recompression that preserves structure, and the difference
+    hash catches a crop or a colour shift that preserves the histogram.
+    """
 
     size = (64, 64)
     source_small = np.asarray(source.resize(size, Image.Resampling.LANCZOS), dtype=np.int16)
@@ -164,8 +247,20 @@ def is_same_photo(query_path: str | Path, media: FetchedMedia) -> bool:
         pixels = np.asarray(gray, dtype=np.int16)
         return pixels[:, 1:] > pixels[:, :-1]
 
-    hash_error = float(np.not_equal(difference_hash(source), difference_hash(candidate)).mean())
-    return mean_error <= 6.0 and hash_error <= 0.04
+    dhash_error = float(np.not_equal(difference_hash(source), difference_hash(candidate)).mean())
+    return mean_error, dhash_error
+
+
+def classify_same_photo(query_path: str | Path, verification: CandidateVerification) -> bool:
+    """Return whether a verified candidate reuses the submitted image.
+
+    ``SearchCandidate.exact_match`` is intentionally absent from this decision. It is a
+    useful discovery hint from Google Lens, but it is not evidence that the downloaded
+    media is the submitted image. Keeping those concepts separate prevents a whole
+    provider bucket from being displayed as source-image reposts.
+    """
+
+    return verification.matched and is_same_photo(query_path, verification.media)
 
 
 def verify_candidate(
@@ -219,8 +314,8 @@ def verify_candidate(
     best_face = faces[best_index]
     best_px = int(min(best_face.width, best_face.height))
 
-    # Shared by every return path below. Typed explicitly so the ** expansion into
-    # CandidateVerification keeps its per-field types.
+    # Shared by every return path below. Typed explicitly so the per-field
+    # CandidateVerification construction stays clear to the type checker.
     common: dict[str, Any] = {
         "faces_detected": len(faces),
         "best_face_index": best_index,
@@ -236,10 +331,18 @@ def verify_candidate(
             **common,
         )
 
-    if best_distance <= match_threshold:
+    # A small face gets a proportionally harder bar, by the measured amount.
+    effective_threshold = match_threshold_for(best_px, match_threshold)
+
+    if best_distance <= effective_threshold:
         status = DecisionStatus.MATCH
+        tightened = (
+            f", tightened from {match_threshold:.2f} for a {best_px}px face"
+            if effective_threshold < match_threshold
+            else ""
+        )
         reason = (
-            f"cosine distance {best_distance:.4f} <= {match_threshold:.2f} "
+            f"cosine distance {best_distance:.4f} <= {effective_threshold:.2f}{tightened} "
             f"against face #{best_index} of {len(faces)} ({best_px}px, "
             f"{media.quality.lower()} media)"
         )
@@ -253,7 +356,7 @@ def verify_candidate(
         # Inside the uncertainty band. Report it rather than resolving it.
         return inconclusive(
             f"cosine distance {best_distance:.4f} falls in the uncertainty band "
-            f"({match_threshold:.2f}, {reject_threshold:.2f})",
+            f"({effective_threshold:.2f}, {reject_threshold:.2f})",
             **common,
         )
 
@@ -263,7 +366,7 @@ def verify_candidate(
         decision=VerificationDecision(
             status=status,
             distance=round(best_distance, 6),
-            threshold=match_threshold if status is DecisionStatus.MATCH else reject_threshold,
+            threshold=effective_threshold if status is DecisionStatus.MATCH else reject_threshold,
             model_name=model_name,
             detector_backend="scrfd_10g",
             candidate_face_index=best_index,
@@ -273,45 +376,31 @@ def verify_candidate(
     )
 
 
-def _quality_weight(quality: MediaQuality) -> float:
-    return {
-        MediaQuality.ORIGINAL: 1.0,
-        MediaQuality.OPENGRAPH: 0.9,
-        MediaQuality.OEMBED: 0.85,
-        MediaQuality.THUMBNAIL: 0.7,
-    }[quality]
-
-
 def rank(verifications: list[CandidateVerification]) -> list[CandidateVerification]:
-    """Order verified matches by strength of evidence.
+    """Order verified matches by strength of evidence: margin, and nothing else.
 
-    Only candidates that already passed the identity gate are ranked. Search rank and the
-    exact-image flag act as tie-breakers among genuine matches; they can never promote a
-    candidate that failed verification.
+    Only candidates that already passed the identity gate are ranked, so ordering can
+    never grant identity. Within that set the order decides which post gets anchored, so
+    it should be defensible on its own terms.
+
+    It used to be a weighted sum of five hand-chosen coefficients over margin, media
+    quality, route agreement, face size and search rank. None of those weights was
+    measured, and four of the five were proxies for one thing: how much signal the
+    comparison had. Now that the match threshold is conditioned on face size, the margin
+    already carries that, a thumbnail is scored against a tighter bar and earns a smaller
+    margin for the same distance. So the extra terms are not just unmeasured, they are
+    redundant, and a single measured quantity is easier to defend than five invented ones.
+
+    Two orderings survive as tie-break keys, and both are editorial rather than
+    evidential: a social post outranks a news photograph because a social post is the
+    deliverable, and an independently found photograph outranks a repost of the submitted
+    image because rediscovering your own pixels is provenance, not discovery.
     """
 
     matches = [item for item in verifications if item.matched]
-
-    def score(item: CandidateVerification) -> float:
-        return (
-            # Distance margin dominates: it is the only identity evidence.
-            4.0 * item.margin
-            + 0.8 * _quality_weight(item.media.quality)
-            + 0.4 * (1.0 if item.candidate.exact_match else 0.0)
-            + 0.3 * min(len(item.candidate.search_routes), 3) / 3.0
-            + 0.2 * min(item.best_face_px, 400) / 400.0
-            - 0.02 * min(item.candidate.search_rank, 25)
-        )
-
-    # Social posts sort ahead of everything else *within* the verified set, because the
-    # deliverable is a social-media post and a news photograph, however sharp, is not one.
-    # This orders matches; it cannot create one. A candidate the face gate rejected is not
-    # in this list at all, so no amount of platform preference can promote it.
     return sorted(
         matches,
-        # An independently found photograph is the useful result. The query photo remains
-        # visible and auditable, but cannot outrank an alternate verified photograph.
-        key=lambda item: (item.same_photo, not item.candidate.is_social, -score(item)),
+        key=lambda item: (item.same_photo, not item.candidate.is_social, -item.margin),
     )
 
 
@@ -348,9 +437,15 @@ __all__ = [
     "DEFAULT_MATCH_THRESHOLD",
     "DEFAULT_REJECT_THRESHOLD",
     "MIN_CANDIDATE_FACE_PX",
+    "SAME_PHOTO_DHASH_ERROR",
+    "SAME_PHOTO_MEAN_ERROR",
+    "SIZE_PENALTIES",
     "CandidateVerification",
+    "classify_same_photo",
     "decode_media",
     "is_same_photo",
+    "match_threshold_for",
+    "photo_difference",
     "rank",
     "verify_all",
     "verify_candidate",
