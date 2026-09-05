@@ -214,9 +214,14 @@ sigil serve          # opens http://127.0.0.1:8420
 Drop, paste or pick an image. Every candidate appears with its cosine distance, the
 reason it passed or failed, the routes that surfaced it, and where the media came from.
 
-**Localhost only, by design.** `serve` refuses any other bind address. Publishing a
-face-search interface would let anyone submit anyone's face, which is the use the
-responsible-use section rules out.
+**Localhost only, by design.** `serve` refuses any other bind address, and there is no
+hosted copy of this. Publishing a face-search interface would let anyone submit anyone's
+face, which is the use the responsible-use section rules out. The task brief does not ask
+for a site either; the deliverable is the pipeline and a recording of it.
+
+A fresh clone starts with no sample photographs, because faces of real people are
+committed nowhere in this repository. Drop your own into `data/samples/` and each one
+becomes a hero tile and a one-click demo.
 
 | | |
 |:--|:--|

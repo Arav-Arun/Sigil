@@ -677,9 +677,8 @@ document.getElementById("files").addEventListener("change", e => verify([...e.ta
 document.getElementById("chain").addEventListener("click", checkChain);
 
 /* Opened straight off the filesystem there is no site around this page, so the links to
-   the other one resolve to nowhere. Drop them rather than leave dead nav. Served over
-   http, by `sigil serve` or by the static host, both pages are always published
-   together, so the links are good. */
+   the other one resolve to nowhere. Drop them rather than leave dead nav. Under
+   `sigil serve` both pages are there, so the links are good. */
 if (location.protocol === "file:") {
   document.querySelectorAll("[data-app-only]").forEach(el => el.remove());
 }

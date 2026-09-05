@@ -167,8 +167,8 @@
   .tile-f.busy::after { opacity:.62; }
   .tile-f.busy .mag { opacity:1; }
   /* The hero composition when there are no sample photographs to fill it. Real faces are
-     never committed to this repository, so a clone and the hosted preview both start with
-     none; drawing the tiles keeps the layout the design intends instead of a blank band. */
+     never committed to this repository, so a fresh clone starts with none; drawing the
+     tiles keeps the layout the design intends instead of a blank band. */
   .tile-p { position:absolute; border-radius:8px; box-shadow:var(--shadow-sm);
             border:1px solid var(--line); overflow:hidden; pointer-events:none;
             display:grid; place-items:center;
@@ -680,27 +680,10 @@ let PAGE = PAGE_STEP;
 let SHOW_REPOSTS = false;
 
 
-/* This page is also published as a static preview, with no pipeline behind it. Face
-   search needs the local Python stack and ~190 MB of model weights, so it cannot run
-   there. Say that plainly on the dropzone rather than letting someone drop a photo and
-   watch nothing happen. Everything that is genuinely static, the explainer, the live
-   Merkle demo, and the whole Verify Evidence page, works either way. */
-let STATIC_PREVIEW = false;
-
-function enterStaticPreview(){
-  STATIC_PREVIEW = true;
-  const dz = $("drop");
-  dz.onclick = null;
-  dz.style.cursor = "default";
-  dz.innerHTML = `
-    <div class="l1">Runs on your machine</div>
-    <div class="l2">not in this preview</div>
-    <div class="l3">Face search needs the local pipeline and about 190&nbsp;MB of model
-      weights, so it is not hosted. Clone the repo and run <code>sigil serve</code> to
-      use it. <a href="/verify">Verify Evidence</a> is fully working here, and so is the
-      fingerprint demo below.</div>`;
-  // Keep the scattered tiles, without faces. SCATTER is declared later in this script,
-  // but this only runs from a settled promise, so it is initialised by then.
+/* Sample photographs are never committed to this repository, so a fresh clone has none
+   and the hero band would otherwise be empty. Draw the scatter without faces instead, so
+   the layout is the one the design intends either way. */
+function drawEmptyScatter(){
   const glyph = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/>
     <path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg>`;
@@ -709,22 +692,17 @@ function enterStaticPreview(){
     return `<div class="tile-p" style="${edge}; top:${s.y}px; width:${s.w}px;
       height:${s.h}px">${glyph}</div>`;
   }).join("");
-  $("try").classList.add("hidden");
 }
 
-const BACKEND = fetch("/api/config")
-  .then(r=>{ if(!r.ok) throw new Error("no backend"); return r.json(); })
-  .then(c=>{
-    const missing=[];
-    if(!c.serpapi_configured) missing.push("SERPAPI_KEY not set");
-    if(!c.contract_address)   missing.push("CONTRACT_ADDRESS not set");
-    if(!missing.length) return true;
-    const el=$("state");
-    el.classList.remove("hidden");
-    el.innerHTML=`<span class="dot warn"></span><span>${esc(missing.join(" · "))}</span>`;
-    return true;
-  })
-  .catch(()=>{ enterStaticPreview(); return false; });
+fetch("/api/config").then(r=>r.json()).then(c=>{
+  const missing=[];
+  if(!c.serpapi_configured) missing.push("SERPAPI_KEY not set");
+  if(!c.contract_address)   missing.push("CONTRACT_ADDRESS not set");
+  if(!missing.length) return;
+  const el=$("state");
+  el.classList.remove("hidden");
+  el.innerHTML=`<span class="dot warn"></span><span>${esc(missing.join(" · "))}</span>`;
+}).catch(()=>{});
 
 /* The scattered hero photos. Positions are fixed; the pictures come from
    data/samples/, so adding a face to that folder adds a tile and a demo at once.
@@ -750,11 +728,10 @@ const MAG = `<span class="mag"><svg viewBox="0 0 24 24" fill="none" stroke="curr
   stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle>
   <path d="M20 20l-4.2-4.2"></path></svg></span>`;
 
-BACKEND.then(ready=>{ if(!ready) return null; return fetch("/api/samples").then(r=>r.json()); })
-.then(d=>{
-  if(!d) return;
+fetch("/api/samples").then(r=>r.json()).then(d=>{
   const list=d.samples||[];
   if(!list.length){
+    drawEmptyScatter();
     $("try").classList.remove("hidden");
     $("samples").innerHTML=`<div class="samples-empty">Drop images into
       <code>data/samples/</code> and they appear here as one-click demos.</div>`;
@@ -910,14 +887,12 @@ const query=()=>new URLSearchParams({
 });
 
 async function submit(f){
-  if(STATIC_PREVIEW) return;
   const body=new FormData(); body.append("image",f,f.name||"upload.jpg");
   UPLOAD=URL.createObjectURL(f);
   await begin(fetch("/api/run?"+query(),{method:"POST",body}));
 }
 
 async function runSample(fileName,url){
-  if(STATIC_PREVIEW) return;
   UPLOAD=url;
   const q=query(); q.set("file",fileName);
   await begin(fetch("/api/run-sample?"+q,{method:"POST"}));

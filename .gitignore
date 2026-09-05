@@ -59,7 +59,3 @@ data/samples/*
 data/bundles/
 *.onnx
 scikit_learn_data/
-
-# Vercel
-.vercel/
-public/

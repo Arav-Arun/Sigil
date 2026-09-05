@@ -340,13 +340,12 @@ def test_results_ui_separates_distinct_photos_from_source_image_reposts():
     assert "Task 3</footer>" in source
 
 
-def test_landing_page_degrades_when_there_is_no_pipeline_behind_it():
-    """The page is also published statically, where face search cannot run.
+def test_landing_page_draws_the_hero_when_there_are_no_samples():
+    """A fresh clone has no sample photographs, and the hero must not be a blank band.
 
-    Without this the hosted copy accepts a photo, posts it to an endpoint that is not
-    there, and appears to hang. The upload panel has to say so instead, and the entry
-    points have to refuse, because paste and drop can still reach them once the
-    affordance is swapped out.
+    Faces of real people are committed nowhere in this repository, so `data/samples/` is
+    empty on every clone. The scatter is drawn without faces in that case, which keeps
+    the layout the design intends.
     """
 
     from pathlib import Path
@@ -355,9 +354,7 @@ def test_landing_page_degrades_when_there_is_no_pipeline_behind_it():
         encoding="utf-8"
     )
 
-    assert "function enterStaticPreview()" in source
-    # A 404 from a static host must be treated as "no backend", not parsed as config.
-    assert 'if(!r.ok) throw new Error("no backend")' in source
-    # Both entry points refuse, not just the dropzone click.
-    assert source.count("if(STATIC_PREVIEW) return;") >= 2
-    assert "Runs on your machine" in source
+    assert "function drawEmptyScatter()" in source
+    # Called on the empty-samples path, not on some unrelated branch.
+    assert 'drawEmptyScatter();\n    $("try").classList.remove("hidden");' in source
+    assert ".tile-p" in source
