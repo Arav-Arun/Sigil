@@ -391,6 +391,7 @@
            letter-spacing:.03em; color:#fff; backdrop-filter:blur(10px); }
   .stamp.ok{background:rgba(29,154,87,.94)} .stamp.bad{background:rgba(224,69,63,.94)}
   .stamp.warn{background:rgba(192,123,18,.94)}
+  .stamp.exact{background:rgba(214,116,25,.94)}
   .d { position:absolute; right:10px; bottom:10px; padding:4px 9px; border-radius:6px;
        background:rgba(28,30,37,.82); color:#fff; font-size:13.5px; backdrop-filter:blur(10px);
        font-family:ui-monospace,Menlo,monospace; }
@@ -976,6 +977,10 @@ async function begin(request){
   try{
     const res=await request; const j=await res.json();
     if(!res.ok) throw new Error(j.error||"run failed");
+    if(j.upload){
+      $("queryImg").onerror = function(){ this.onerror=null; this.src=j.upload; };
+      if(!UPLOAD){ UPLOAD = j.upload; $("queryImg").src = UPLOAD; }
+    }
     poll(j.run_id);
   }catch(e){ RUNNING=false; show("landing"); alert("Could not start the run: "+e.message); }
 }
@@ -1004,7 +1009,10 @@ function poll(id){
   const tick=async()=>{
     const s=await (await fetch("/api/run/"+id)).json();
     steps(s.stage);
-    if(s.status==="done"){ RUNNING=false; RUN=s.result; render(); }
+    if(s.upload && (!UPLOAD || $("queryImg").naturalWidth === 0)){
+      $("queryImg").src = s.upload;
+    }
+    if(s.status==="done"){ RUNNING=false; RUN=s.result; render(s); }
     else if(s.status==="error"){ RUNNING=false; show("landing"); alert("Run failed: "+s.error); }
     else setTimeout(tick,700);
   }; tick();
@@ -1024,17 +1032,29 @@ function show(w){
 const kind=s=>s==="MATCH"?"ok":s==="NON_MATCH"?"bad":"warn";
 const SW={all:"#d67419",MATCH:"#1d9a57",NON_MATCH:"#e0453f",INCONCLUSIVE:"#c07b12"};
 
-function render(){
+function render(s){
   const r=RUN, cs=r.candidates||[], sel=r.selected;
+  if(s && s.upload && (!UPLOAD || $("queryImg").naturalWidth === 0)){
+    $("queryImg").src = s.upload;
+  }
   $("prog").classList.add("hidden");
   const n={all:cs.length,MATCH:0,NON_MATCH:0,INCONCLUSIVE:0};
   for(const c of cs) n[c.decision.status]=(n[c.decision.status]||0)+1;
+  const matches=cs.filter(c=>c.decision.status==="MATCH");
+  const alternates=matches.filter(c=>!c.same_photo).length;
+  const exactPhotos=matches.length-alternates;
 
-  if(sel){
-    $("verdict").innerHTML=`<div class="verdict ok"><div class="h">Verified match</div>
+  if(sel && alternates){
+    $("verdict").innerHTML=`<div class="verdict ok"><div class="h">Verified face match</div>
       <p>Cosine distance <strong>${sel.decision.distance.toFixed(4)}</strong> against a threshold
       of ${sel.decision.threshold}, a margin of ${sel.margin.toFixed(4)}.
-      ${n.MATCH} of ${cs.length} candidates passed the face gate.</p></div>`;
+      ${alternates} alternate photo${alternates===1?"":"s"} passed the face gate${exactPhotos
+        ? `; ${exactPhotos} exact-photo duplicate${exactPhotos===1?" was":"s were"} kept for provenance`
+        : ""}.</p></div>`;
+  } else if(sel){
+    $("verdict").innerHTML=`<div class="verdict warn"><div class="h">Exact photo found</div>
+      <p>The uploaded photograph was rediscovered, but no different photo of the same face
+      passed verification. ${cs.length} candidates were checked across the available routes.</p></div>`;
   } else if(r.error_code==="SEARCH_EMPTY"){
     $("verdict").innerHTML=`<div class="verdict warn"><div class="h">No social result found</div>
       <p>The live search returned nothing on the allowed platforms. This face may not be
@@ -1083,7 +1103,7 @@ function render(){
   const link = $("reportLink");
   if (link) link.onclick = ev => { ev.preventDefault(); openReport(); };
 
-  const shown=cs.filter(c=>c.decision.status==="MATCH");
+  const shown=matches.sort((a,b)=>Number(a.same_photo)-Number(b.same_photo));
   const page=shown.slice(0, PAGE);
   $("grid").innerHTML=page.map(c=>{
     const s=c.decision.status,k=kind(s);
@@ -1095,15 +1115,20 @@ function render(){
                      onerror="this.parentNode.innerHTML=this.parentNode.innerHTML.replace(/<img[^>]*>/,'<div class=&quot;noimg&quot;>media not retrievable</div>')">`;
     const routes=(c.search_routes||[]).map(x=>`<span class="rt" title="${esc(x)}">${esc(x.split(":")[0])}</span>`).join("");
     const mt=q?`<span class="rt media" title="Media came from the ${esc(MEDIA[q]||q)}">${esc(q.toLowerCase())}</span>`:"";
+    const label=c.same_photo?"EXACT PHOTO":s;
+    const stampClass=c.same_photo?"exact":k;
+    const duplicate=c.same_photo
+      ? `<span class="rt" title="This is the uploaded photograph, possibly re-encoded">same photo</span>`
+      : "";
     return `<div class="card">
-      <div class="shot">${shot}<span class="stamp ${k}">${esc(s)}</span><span class="d">d=${d}</span></div>
+      <div class="shot">${shot}<span class="stamp ${stampClass}">${esc(label)}</span><span class="d">d=${d}</span></div>
       <div class="cmeta">
         <div class="srow">${favicon(c, P)}
           <span class="cplat">${esc(P.n)}</span>
           <a class="copen" href="${esc(c.source_url)}" target="_blank" rel="noopener noreferrer">Open</a></div>
         <a class="curl" href="${esc(c.source_url)}" target="_blank" rel="noopener noreferrer"
            title="${esc(c.source_url)}">${esc(prettyUrl(c.source_url))}</a>
-        <div class="prov">${routes}${mt}</div>
+        <div class="prov">${routes}${mt}${duplicate}</div>
         <div class="why">${esc(c.decision.reason)}</div>
       </div></div>`;
   }).join("");

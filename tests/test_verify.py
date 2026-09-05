@@ -7,10 +7,12 @@ INCONCLUSIVE rather than being rounded to a decision.
 
 from __future__ import annotations
 
+import io
 from datetime import UTC, datetime
 
 import numpy as np
 import pytest
+from PIL import Image
 
 from sigil.candidates import FetchedMedia, MediaQuality
 from sigil.models import DecisionStatus, SearchCandidate
@@ -18,6 +20,7 @@ from sigil.verify import (
     DEFAULT_MATCH_THRESHOLD,
     DEFAULT_REJECT_THRESHOLD,
     CandidateVerification,
+    is_same_photo,
     rank,
     verify_candidate,
 )
@@ -50,7 +53,9 @@ def make_media(candidate=None, *, ok=True, quality=MediaQuality.ORIGINAL, error=
     )
 
 
-def make_verification(distance, *, status=None, quality=MediaQuality.ORIGINAL, **candidate_kwargs):
+def make_verification(
+    distance, *, status=None, quality=MediaQuality.ORIGINAL, same_photo=False, **candidate_kwargs
+):
     from sigil.models import VerificationDecision
 
     if status is None:
@@ -78,6 +83,7 @@ def make_verification(distance, *, status=None, quality=MediaQuality.ORIGINAL, *
         faces_detected=1,
         best_face_index=0,
         best_face_px=200,
+        same_photo=same_photo,
     )
 
 
@@ -210,11 +216,61 @@ class TestRanking:
         ]
         assert str(rank(items)[0].candidate.source_url) == "https://x.com/b/status/2"
 
+    def test_an_alternate_photo_outranks_the_uploaded_photo(self):
+        items = [
+            make_verification(0.0, url="https://x.com/exact/status/1", rank_=1, same_photo=True),
+            make_verification(0.35, url="https://x.com/alternate/status/2", rank_=20),
+        ]
+
+        assert str(rank(items)[0].candidate.source_url) == "https://x.com/alternate/status/2"
+
     def test_empty_input_ranks_to_empty(self):
         assert rank([]) == []
 
     def test_margin_is_positive_for_a_match(self):
         assert make_verification(0.30).margin == pytest.approx(DEFAULT_MATCH_THRESHOLD - 0.30)
+
+
+class TestSamePhoto:
+    def _media(self, image: Image.Image) -> FetchedMedia:
+        buffer = io.BytesIO()
+        image.save(buffer, format="JPEG", quality=82)
+        candidate = make_candidate()
+        return FetchedMedia(
+            candidate=candidate,
+            data=buffer.getvalue(),
+            sha256="ab" * 32,
+            content_type="image/jpeg",
+            byte_count=buffer.tell(),
+            status_code=200,
+            quality=MediaQuality.ORIGINAL,
+        )
+
+    def test_recognises_the_same_pixels_after_reencoding(self, tmp_path):
+        pixels = np.zeros((120, 160, 3), dtype=np.uint8)
+        pixels[:, :80] = (230, 40, 40)
+        pixels[:, 80:] = (20, 80, 220)
+        source = Image.fromarray(pixels)
+        path = tmp_path / "query.png"
+        source.save(path)
+
+        assert is_same_photo(path, self._media(source.resize((800, 600))))
+
+    def test_rejects_a_different_photo(self, tmp_path):
+        source = Image.new("RGB", (160, 120), (230, 40, 40))
+        path = tmp_path / "query.png"
+        source.save(path)
+        different = Image.new("RGB", (160, 120), (20, 80, 220))
+
+        assert not is_same_photo(path, self._media(different))
+
+    def test_serialization_exposes_duplicate_status_and_candidate_context(self):
+        item = make_verification(0.0, exact=True, same_photo=True)
+        payload = item.to_json()
+
+        assert payload["exact_match"] is True
+        assert payload["same_photo"] is True
+        assert "title" in payload
 
 
 class TestCalibrationIsPinned:

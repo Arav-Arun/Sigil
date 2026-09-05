@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 from sigil import __version__
 from sigil.candidates import fetch_all_sync
@@ -33,6 +34,7 @@ from sigil.verify import (
     DEFAULT_MATCH_THRESHOLD,
     DEFAULT_REJECT_THRESHOLD,
     CandidateVerification,
+    is_same_photo,
     rank,
     verify_all,
 )
@@ -136,8 +138,10 @@ def _harvest_entity(verifications: list[CandidateVerification]) -> str:
     attached to a person the pipeline has already identified rather than to a guess. The
     name is still never evidence of identity; it is only a better query.
 
-    A name has to appear on at least two independently-found matches to count, which is
-    what stops a single mislabelled page from steering the next search.
+    A title-derived name has to appear on at least two independently-found matches. When
+    only the query photograph was rediscovered, a name-like media filename may be used as
+    a weaker search hint. Neither path decides identity; every result from the hint still
+    has to pass the original face embedding gate.
     """
 
     from collections import Counter
@@ -159,14 +163,155 @@ def _harvest_entity(verifications: list[CandidateVerification]) -> str:
     for phrase, count in counts.most_common():
         if count >= 2:
             return phrase
+
+    filename_noise = {
+        "avatar",
+        "face",
+        "headshot",
+        "image",
+        "img",
+        "photo",
+        "picture",
+        "profile",
+        "query",
+        "selfie",
+        "thumbnail",
+    }
+    for item in verifications:
+        if not item.matched or not item.same_photo:
+            continue
+        media_urls = [item.candidate.image_url, item.media.final_url]
+        for media_url in media_urls:
+            if not media_url:
+                continue
+            stem = Path(unquote(urlsplit(str(media_url)).path)).stem
+            words = [word for word in re.split(r"[-_.]+", stem) if word.isalpha()]
+            if not 1 <= len(words) <= 3:
+                continue
+            if any(word.lower() in filename_noise for word in words):
+                continue
+            if all(3 <= len(word) <= 30 for word in words):
+                return " ".join(word.capitalize() for word in words)
     return ""
+
+
+def _person_name_from_label(label: str) -> str:
+    """Accept a compact person-like image label as a search hint, never as evidence."""
+
+    normalized = " ".join(label.split()).strip()
+    words = normalized.split()
+    if not 2 <= len(words) <= 5:
+        return ""
+    if normalized.lower() in _ENTITY_NOISE | {"go for gold"}:
+        return ""
+    if not all(re.fullmatch(r"[A-Z][A-Za-z'\-]{1,29}", word) for word in words):
+        return ""
+    return normalized
+
+
+def _expand_matched_pages(
+    verifications: list[CandidateVerification],
+    source_embedding: Any,
+    *,
+    resolved: Settings,
+    engine: Any,
+    discovered_at: datetime,
+    match_threshold: float,
+    reject_threshold: float,
+    on_stage: Any,
+    result: RunResult,
+    raw_responses: dict[str, Any],
+) -> tuple[list[CandidateVerification], str]:
+    """Check every photograph on the page that already passed face verification."""
+
+    from sigil.search.providers.pages import PageHarvestProvider
+
+    pages = list(
+        dict.fromkeys(
+            str(item.candidate.source_url)
+            for item in verifications
+            if item.matched and not item.candidate.is_social
+        )
+    )
+    if not pages:
+        return [], ""
+
+    try:
+        with _stage(result, "expand", on_stage):
+            outcome = PageHarvestProvider(timeout=resolved.http_timeout_seconds).harvest(
+                pages, discovered_at=discovered_at, max_pages=2
+            )
+            outcome.name = "page-harvest:verified-match"
+            raw_responses[outcome.name] = outcome.raw
+
+            # Link the already verified image back to its label on the source page. For
+            # example, the search result title may be merely "Go For Gold", while the
+            # page's exact image element says alt="Gaurish Baliga". This label only seeds
+            # another search; it never changes a face decision.
+            verified_by_image = {
+                str(url): item
+                for item in verifications
+                if item.matched and item.same_photo
+                for url in (item.candidate.image_url, item.media.final_url)
+                if url
+            }
+            entity_hint = ""
+            for candidate in outcome.candidates:
+                item = verified_by_image.get(str(candidate.image_url or ""))
+                if item is None:
+                    continue
+                label_entity = _person_name_from_label(candidate.title)
+                if label_entity:
+                    item.candidate.title = candidate.title
+                    entity_hint = entity_hint or label_entity
+            if entity_hint:
+                outcome.entities = [entity_hint]
+            result.sources.append(outcome.summary())
+
+            known_media = {
+                str(url)
+                for item in verifications
+                for url in (item.candidate.image_url, item.media.final_url)
+                if url
+            }
+            fresh = [
+                candidate
+                for candidate in outcome.candidates
+                if str(candidate.image_url or "") not in known_media
+            ]
+            if not fresh:
+                return [], entity_hint
+            media = fetch_all_sync(
+                fresh,
+                concurrency=resolved.download_concurrency,
+                timeout=resolved.http_timeout_seconds,
+            )
+            checked, _ = verify_all(
+                source_embedding,
+                media,
+                engine=engine,
+                model_name=engine.model_id,
+                match_threshold=match_threshold,
+                reject_threshold=reject_threshold,
+            )
+    except Exception as exc:
+        logger.warning("verified-page expansion failed: %s: %s", type(exc).__name__, exc)
+        return [], ""
+
+    logger.info(
+        "verified-page expansion added %d candidate(s), %d verified",
+        len(checked),
+        sum(1 for item in checked if item.matched),
+    )
+    return checked, entity_hint
 
 
 def _expand_from_match(
     verifications: list[CandidateVerification],
-    seed: CandidateVerification,
     source_embedding: Any,
     *,
+    entity_hint: str,
+    search_client: Any,
     resolved: Settings,
     engine: Any,
     discovered_at: datetime,
@@ -175,6 +320,7 @@ def _expand_from_match(
     known_urls: set[str],
     on_stage: Any,
     result: RunResult,
+    raw_responses: dict[str, Any],
 ) -> list[CandidateVerification]:
     """Search again using a name harvested from pages the face gate already confirmed.
 
@@ -191,27 +337,92 @@ def _expand_from_match(
     verified match must not be lost because a second provider was slow or unconfigured.
     """
 
+    from sigil.search.providers.base import ProviderResult
     from sigil.search.providers.exa import ExaProvider
+    from sigil.search.routes import _site_query, merge_candidates, parse_candidates
 
-    exa = ExaProvider(resolved.exa_api_key.get_secret_value())
-    if not exa.configured():
-        return []
-
-    entity = _harvest_entity(verifications)
+    entity = entity_hint or _harvest_entity(verifications)
     if not entity:
         logger.info("expansion skipped: the confirmed pages agree on no name")
         return []
 
     try:
         with _stage(result, "expand", on_stage):
-            outcome = exa.search([entity], discovered_at=discovered_at)
-            outcome.name = f"exa:confirmed-name:{entity}"
-            result.sources.append(outcome.summary())
-            fresh = [c for c in outcome.candidates if str(c.source_url) not in known_urls]
+            outcomes: list[ProviderResult] = []
+
+            route = f"R5:serp-confirmed-name:{entity}"
+            started = time.perf_counter()
+            try:
+                payload = search_client.web(
+                    _site_query(entity),
+                    route=route,
+                    country=resolved.search_country,
+                    language=resolved.search_language,
+                )
+                outcomes.append(
+                    ProviderResult(
+                        name=route,
+                        candidates=parse_candidates(
+                            payload, route=route, discovered_at=discovered_at
+                        ),
+                        entities=[entity],
+                        raw=payload,
+                        elapsed_ms=(time.perf_counter() - started) * 1000,
+                    )
+                )
+            except Exception as exc:
+                logger.warning(
+                    "confirmed-name SerpApi search failed: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
+                outcomes.append(
+                    ProviderResult(
+                        name=route,
+                        entities=[entity],
+                        elapsed_ms=(time.perf_counter() - started) * 1000,
+                        error=f"{type(exc).__name__}: {exc}",
+                    )
+                )
+
+            exa = ExaProvider(resolved.exa_api_key.get_secret_value())
+            if exa.configured():
+                started = time.perf_counter()
+                try:
+                    exa_outcome = exa.search([entity], discovered_at=discovered_at)
+                    exa_outcome.name = f"exa:confirmed-name:{entity}"
+                    exa_outcome.entities = [entity]
+                    exa_outcome.elapsed_ms = (time.perf_counter() - started) * 1000
+                    outcomes.append(exa_outcome)
+                except Exception as exc:
+                    logger.warning(
+                        "confirmed-name Exa search failed: %s: %s", type(exc).__name__, exc
+                    )
+                    outcomes.append(
+                        ProviderResult(
+                            name=f"exa:confirmed-name:{entity}",
+                            entities=[entity],
+                            elapsed_ms=(time.perf_counter() - started) * 1000,
+                            error=f"{type(exc).__name__}: {exc}",
+                        )
+                    )
+
+            candidates = []
+            for outcome in outcomes:
+                result.sources.append(outcome.summary())
+                if outcome.raw:
+                    raw_responses[outcome.name] = outcome.raw
+                candidates.extend(outcome.candidates)
+
+            fresh = [
+                candidate
+                for candidate in merge_candidates(candidates)
+                if str(candidate.source_url) not in known_urls
+            ]
             logger.info(
                 "expansion on confirmed name %r: %d result(s), %d new",
                 entity,
-                len(outcome.candidates),
+                len(candidates),
                 len(fresh),
             )
             if not fresh:
@@ -312,6 +523,7 @@ def run_pipeline(
             discovery = discover(
                 face.source_image,
                 face.portrait_crop_path or face.face_crop_path,
+                face.face_crop_path,
                 settings=resolved,
                 client=search_client,
                 max_results=max_candidates,
@@ -340,7 +552,7 @@ def run_pipeline(
 
     # -- 4. verify -------------------------------------------------------------
     with _stage(result, "verify", on_stage):
-        verifications, ranked = verify_all(
+        verifications, _ = verify_all(
             source_embedding,
             media,
             engine=engine,
@@ -348,6 +560,12 @@ def run_pipeline(
             match_threshold=match_threshold,
             reject_threshold=reject_threshold,
         )
+    for item in verifications:
+        if item.matched:
+            item.same_photo = item.candidate.exact_match or is_same_photo(
+                face.source_image, item.media
+            )
+    ranked = rank(verifications)
     result.verifications = verifications
 
     # -- 4b. expand from what was confirmed ------------------------------------
@@ -359,10 +577,35 @@ def run_pipeline(
     # drift away from the original face by way of "similar page" hops, and each hop is a
     # weaker link to the person than the one before it.
     if ranked:
+        page_expanded, page_entity = _expand_matched_pages(
+            verifications,
+            source_embedding,
+            resolved=resolved,
+            engine=engine,
+            discovered_at=datetime.now(UTC),
+            match_threshold=match_threshold,
+            reject_threshold=reject_threshold,
+            on_stage=on_stage,
+            result=result,
+            raw_responses=discovery["raw_responses"],
+        )
+        if page_entity and page_entity not in discovery["entities_inferred"]:
+            discovery["entities_inferred"].append(page_entity)
+        for item in page_expanded:
+            if item.matched:
+                item.same_photo = item.candidate.exact_match or is_same_photo(
+                    face.source_image, item.media
+                )
+        if page_expanded:
+            verifications = verifications + page_expanded
+            result.verifications = verifications
+            ranked = rank(verifications)
+
         expanded = _expand_from_match(
             verifications,
-            ranked[0],
             source_embedding,
+            entity_hint=page_entity,
+            search_client=search_client,
             resolved=resolved,
             engine=engine,
             discovered_at=datetime.now(UTC),
@@ -371,11 +614,28 @@ def run_pipeline(
             known_urls={str(v.candidate.source_url) for v in verifications},
             on_stage=on_stage,
             result=result,
+            raw_responses=discovery["raw_responses"],
         )
         if expanded:
+            for item in expanded:
+                if item.matched:
+                    item.same_photo = item.candidate.exact_match or is_same_photo(
+                        face.source_image, item.media
+                    )
             verifications = verifications + expanded
             result.verifications = verifications
             ranked = rank(verifications)
+
+        # Post-verification routes use the same quota-aware client and belong in the same
+        # audit trail as discovery. Refresh these snapshots after expansion rather than
+        # leaving the UI and evidence bundle with the pre-expansion totals.
+        discovery["search_records"] = list(search_client.search_records)
+        discovery["budget"] = search_client.budget.summary()
+        for route in discovery["raw_responses"]:
+            if route not in discovery["routes_run"]:
+                discovery["routes_run"].append(route)
+        result.search_records = discovery["search_records"]
+        result.budget = discovery["budget"]
 
     if not ranked:
         inconclusive = sum(

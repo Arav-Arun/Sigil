@@ -5,9 +5,26 @@ from unittest.mock import MagicMock, patch
 
 from PIL import Image
 
+from sigil.candidates import MediaQuality
 from sigil.config import ConfigurationError, Settings
 from sigil.models import FaceObservation, PipelineErrorCode
-from sigil.run import run_pipeline
+from sigil.run import _harvest_entity, _person_name_from_label, run_pipeline
+
+
+def test_confirmed_query_photo_filename_can_seed_more_searches() -> None:
+    verified = MagicMock(
+        matched=True,
+        same_photo=True,
+        candidate=MagicMock(title="Go For Gold", image_url="https://example.com/gaurish.png"),
+        media=MagicMock(final_url="https://example.com/gaurish.png"),
+    )
+
+    assert _harvest_entity([verified]) == "Gaurish"
+
+
+def test_confirmed_page_image_label_can_seed_a_full_name_search() -> None:
+    assert _person_name_from_label(" Gaurish   Baliga ") == "Gaurish Baliga"
+    assert _person_name_from_label("Go For Gold") == ""
 
 
 def test_run_pipeline_no_face(tmp_path: Path) -> None:
@@ -84,7 +101,7 @@ def test_run_pipeline_chain_configuration_error_preserves_bundle(
                         matched=True,
                         media=MagicMock(
                             sha256="aa" * 32,
-                            quality="HIGH",
+                            quality=MediaQuality.ORIGINAL,
                             final_url="https://x.com/img.jpg",
                             data=b"fake",
                         ),
@@ -92,14 +109,21 @@ def test_run_pipeline_chain_configuration_error_preserves_bundle(
                             source_url="https://x.com/post/1",
                             platform="x",
                             post_id="1",
+                            title="",
                             discovered_at=mock_face.quality.face_size_px
                             and MagicMock(isoformat=lambda: "2026-09-01T00:00:00Z"),
                             search_routes=["R1"],
+                            search_rank=1,
+                            exact_match=False,
+                            is_social=True,
                         ),
                         decision=MagicMock(
                             status="MATCH", distance=0.1, threshold=0.36, candidate_face_index=0
                         ),
                         faces_detected=1,
+                        best_face_px=100,
+                        margin=0.26,
+                        same_photo=False,
                     )
                 ],
                 [
@@ -107,7 +131,7 @@ def test_run_pipeline_chain_configuration_error_preserves_bundle(
                         matched=True,
                         media=MagicMock(
                             sha256="aa" * 32,
-                            quality="HIGH",
+                            quality=MediaQuality.ORIGINAL,
                             final_url="https://x.com/img.jpg",
                             data=b"fake",
                         ),
@@ -117,11 +141,17 @@ def test_run_pipeline_chain_configuration_error_preserves_bundle(
                             post_id="1",
                             discovered_at=MagicMock(isoformat=lambda: "2026-09-01T00:00:00Z"),
                             search_routes=["R1"],
+                            search_rank=1,
+                            exact_match=False,
+                            is_social=True,
                         ),
                         decision=MagicMock(
                             status="MATCH", distance=0.1, threshold=0.36, candidate_face_index=0
                         ),
                         faces_detected=1,
+                        best_face_px=100,
+                        margin=0.26,
+                        same_photo=False,
                     )
                 ],
             ),

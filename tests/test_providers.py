@@ -203,9 +203,15 @@ class TestPageHarvest:
         from sigil.search.providers.pages import PageHarvestProvider
 
         provider = PageHarvestProvider()
-        provider._fetch = lambda url: '<img src="/a.jpg"><img src="/b.jpg">'  # type: ignore[method-assign]
+        provider._fetch = lambda url: (  # type: ignore[method-assign]
+            '<img src="/a.jpg" alt="Gaurish Baliga"><img src="/b.jpg">'
+        )
         result = provider.harvest(["https://example.com/about"], discovered_at=datetime.now(UTC))
         assert len(result.candidates) == 2
         # Same page URL, so the post_id is what keeps them apart through deduplication.
         assert {c.post_id for c in result.candidates} == {"img0", "img1"}
         assert len({str(c.image_url) for c in result.candidates}) == 2
+        assert result.candidates[0].title == "Gaurish Baliga"
+        assert result.raw["https://example.com/about"]["labels"] == {
+            "https://example.com/a.jpg": "Gaurish Baliga"
+        }

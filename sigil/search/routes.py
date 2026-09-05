@@ -5,13 +5,16 @@ Route  What it asks                                                         Cost
 ===== ==================================================================== ========
 R1     Lens ``type=all`` on the full image: visual matches, pages *about*   1 search
        the image, and the entity Lens inferred, in one response
-R2     Entity pivot: that inferred name, restricted to social domains       1 search
-R3     Lens ``type=all`` on a head-and-shoulders crop, identity-led         1 search
+R2     Lens ``type=all`` on a head-and-shoulders crop                        1 search
+R3     Lens ``type=all`` on the aligned face crop                            1 search
+R4     Entity pivot: an inferred name, restricted to social domains         1 search
 ===== ==================================================================== ========
 
-R1 runs alone first because it is usually sufficient and because R2 depends on the entity
-it returns. If R1 comes back short, R2 and R3 run **concurrently**, since neither needs
-the other. A well-indexed subject therefore costs one search; a hard one costs three.
+R1 runs alone first because it can produce the entity used by R4. R2 and R3 then run
+concurrently. Candidate count from R1 is deliberately not used as a stopping condition:
+a full-photo search can return sixty matches for a logo or shirt while finding only one
+face. A successful run therefore spends three image searches, plus R4 when an entity was
+inferred and the configured budget permits it.
 
 ``type=all`` replaced a pair of narrower calls (``exact_matches`` then ``visual_matches``).
 It returns strictly more, including the ``organic_results`` block of pages that discuss
@@ -256,6 +259,100 @@ def merge_candidates(candidates: list[SearchCandidate]) -> list[SearchCandidate]
     )
 
 
+def select_candidates(candidates: list[SearchCandidate], limit: int) -> list[SearchCandidate]:
+    """Cap work without letting one noisy route crowd every other route out.
+
+    Lens routinely returns sixty visually similar items for each query. Taking the first
+    ``limit`` after a global sort meant R1 could occupy every slot, even when it was matching
+    a shirt rather than a face. Exact-image hits are retained for provenance, then the
+    remaining slots are filled round-robin across discovery routes. Ordering within each
+    route still comes from :func:`merge_candidates`.
+    """
+
+    if limit <= 0:
+        return []
+    merged = merge_candidates(candidates)
+    if len(merged) <= limit:
+        return merged
+
+    selected: list[SearchCandidate] = []
+    seen: set[tuple[str, str]] = set()
+
+    def identity(item: SearchCandidate) -> tuple[str, str]:
+        return str(item.source_url), item.post_id
+
+    def add(item: SearchCandidate) -> bool:
+        key = identity(item)
+        if key in seen or len(selected) >= limit:
+            return False
+        seen.add(key)
+        selected.append(item)
+        return True
+
+    for item in merged:
+        if item.exact_match:
+            add(item)
+
+    def route_group(route: str) -> str:
+        # A page harvester records the source domain in its route. Those domains are one
+        # discovery method, not dozens of independent methods entitled to separate quota.
+        return "page-harvest" if route.startswith("page-harvest:") else route
+
+    routes = sorted(
+        {route_group(route) for item in merged for route in item.search_routes},
+        key=lambda route: (
+            0
+            if "lens-all-face" in route
+            else 1
+            if "lens-all-portrait" in route
+            else 2
+            if "entity-pivot" in route
+            else 3
+            if route.startswith("exa")
+            else 4
+            if route.startswith("wikidata")
+            else 5
+            if route == "page-harvest"
+            else 6,
+            route,
+        ),
+    )
+    buckets = {
+        route: sorted(
+            [
+                item
+                for item in merged
+                if route in {route_group(value) for value in item.search_routes}
+            ],
+            # Keep the search provider's own rank inside a route. Global social-first
+            # sorting is useful for presentation, but it hid R1's rank-one exact photo
+            # behind a dozen unrelated social results about a logo on the shirt.
+            key=lambda item: (not item.exact_match, item.search_rank, not item.is_social),
+        )
+        for route in routes
+    }
+    offsets = {route: 0 for route in routes}
+
+    while len(selected) < limit:
+        progressed = False
+        for route in routes:
+            bucket = buckets[route]
+            while offsets[route] < len(bucket):
+                item = bucket[offsets[route]]
+                offsets[route] += 1
+                if add(item):
+                    progressed = True
+                    break
+            if len(selected) >= limit:
+                break
+        if not progressed:
+            break
+
+    for item in merged:
+        add(item)
+    return selected
+
+
 def _wrap(fn: Any, name: str, *args: Any) -> ProviderResult:
     """Adapt a SerpApi route helper to the provider contract."""
 
@@ -266,11 +363,11 @@ def _wrap(fn: Any, name: str, *args: Any) -> ProviderResult:
 def discover(
     image_path: str | Path,
     crop_path: str | Path | None = None,
+    face_crop_path: str | Path | None = None,
     *,
     settings: Settings | None = None,
     client: SerpApiClient | None = None,
     max_results: int = 15,
-    enough: int = 8,
     no_cache: bool = False,
     use_cache: bool = True,
     budget_limit: int = 4,
@@ -344,59 +441,64 @@ def discover(
         if name_hint:
             entities = [name_hint, *(e for e in entities if e != name_hint)]
 
-        social = sum(1 for candidate in candidates if candidate.is_social)
-        # A caller-supplied name always escalates. Wave one returned sixty visually similar
-        # strangers and therefore looked "sufficient", so the escalation never fired and the
-        # name was never used, which is the one case the caller bothered to supply it for.
-        if name_hint or len(candidates) < enough or not social:
-            # Wave two. Four sources that fail in different ways, run at once: wall clock
-            # is the slowest of them rather than the sum, and losing any one of them costs
-            # coverage instead of taking the run down.
-            jobs: list[tuple[str, Any]] = []
-            budget_left = active.budget.remaining
+        # Wave two always searches the crops. A result count cannot tell us whether R1
+        # found the face or merely a prominent object in the photo; only verification can.
+        jobs: list[tuple[str, Any]] = []
+        budget_left = active.budget.remaining
 
-            if crop_path and budget_left:
-                jobs.append(
-                    (
-                        "R2:lens-all-portrait",
-                        lambda: _wrap(lens_route, "R2:lens-all-portrait", crop_path, "all"),
-                    )
+        if crop_path and budget_left:
+            jobs.append(
+                (
+                    "R2:lens-all-portrait",
+                    lambda: _wrap(lens_route, "R2:lens-all-portrait", crop_path, "all"),
                 )
-                budget_left -= 1
-            if entities and budget_left:
-                jobs.append(
-                    (
-                        "R3:serp-entity-pivot",
-                        lambda: _wrap(web_route, "R3:serp-entity-pivot", entities[0]),
-                    )
+            )
+            budget_left -= 1
+        if face_crop_path and budget_left and Path(face_crop_path) != Path(crop_path or ""):
+            jobs.append(
+                (
+                    "R3:lens-all-face",
+                    lambda: _wrap(lens_route, "R3:lens-all-face", face_crop_path, "all"),
                 )
-                budget_left -= 1
-            if entities and exa is not None and exa.configured():
-                jobs.append(("exa", lambda: exa.search(entities, discovered_at=discovered_at)))
-            if entities and wikidata is not None:
-                jobs.append(
-                    ("wikidata", lambda: wikidata.search(entities, discovered_at=discovered_at))
+            )
+            budget_left -= 1
+        if entities and budget_left:
+            jobs.append(
+                (
+                    "R4:serp-entity-pivot",
+                    lambda: _wrap(web_route, "R4:serp-entity-pivot", entities[0]),
                 )
+            )
+        if entities and exa.configured():
+            jobs.append(("exa", lambda: exa.search(entities, discovered_at=discovered_at)))
+        if entities:
+            jobs.append(
+                ("wikidata", lambda: wikidata.search(entities, discovered_at=discovered_at))
+            )
 
-            for report in run_providers(jobs, timeout=provider_timeout):
-                source_reports.append(report.summary())
-                if report.ok and report.candidates:
-                    routes_run.append(report.name)
-                    candidates.extend(report.candidates)
-                    if report.raw:
-                        raw_responses[report.name] = report.raw
+        for report in run_providers(jobs, timeout=provider_timeout):
+            source_reports.append(report.summary())
+            if report.ok and report.candidates:
+                routes_run.append(report.name)
+                candidates.extend(report.candidates)
+                if report.raw:
+                    raw_responses[report.name] = report.raw
 
         # Harvest. Non-social pages, the personal sites and writeups, carry several photos
         # of a person while the search returned at most one of them. A subject's own
         # portfolio held four pictures of them and the provider surfaced none.
         harvest_pages = [
             str(c.source_url)
-            for c in merge_candidates(candidates)
+            for c in sorted(
+                merge_candidates(candidates),
+                key=lambda item: (not item.exact_match, item.search_rank, str(item.source_url)),
+            )
             if not c.is_social and not str(c.source_url).startswith("data:")
         ]
         if harvest_pages:
             harvested = PageHarvestProvider().harvest(harvest_pages, discovered_at=discovered_at)
             source_reports.append(harvested.summary())
+            raw_responses[harvested.name] = harvested.raw
             if harvested.candidates:
                 routes_run.append(harvested.name)
                 candidates.extend(harvested.candidates)
@@ -405,7 +507,7 @@ def discover(
             raise
         logger.warning("a search route failed; continuing with %d candidate(s)", len(candidates))
 
-    ranked = merge_candidates(candidates)[:max_results]
+    ranked = select_candidates(candidates, max_results)
     if not ranked:
         raise WebSearchError(
             PipelineErrorCode.SEARCH_EMPTY,
@@ -432,4 +534,5 @@ __all__ = [
     "infer_entities",
     "merge_candidates",
     "parse_candidates",
+    "select_candidates",
 ]

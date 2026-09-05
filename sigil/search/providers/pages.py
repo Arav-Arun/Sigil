@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 import re
 from datetime import datetime
+from html import unescape as html_unescape
 from urllib.parse import urljoin, urlsplit
 
 import requests
@@ -44,7 +45,7 @@ logger = logging.getLogger(__name__)
 USER_AGENT = "Mozilla/5.0 (compatible; Sigil/0.3; +https://github.com/Arav-Arun/HHgoa-FaceID)"
 
 MAX_PAGE_BYTES = 3_000_000
-MAX_IMAGES_PER_PAGE = 12
+MAX_IMAGES_PER_PAGE = 24
 MAX_PAGES = 4
 
 # Images that are never a person. Filtering here is a latency decision, not an identity
@@ -55,45 +56,74 @@ _SKIP_PATTERN = re.compile(
     re.I,
 )
 
-_IMG_SRC = re.compile(r"<img[^>]+?src=[\"']([^\"']+)", re.I)
-_IMG_SRCSET = re.compile(r"<img[^>]+?srcset=[\"']([^\"']+)", re.I)
+_IMG_TAG = re.compile(r"<img\b[^>]*>", re.I | re.S)
 _META_IMAGE = re.compile(r"(?:og:image|twitter:image)[\"'][^>]*content=[\"']([^\"']+)", re.I)
 # Modern front ends often keep image paths in JSON payloads rather than in <img> tags, so
 # the portfolio that started this would have yielded almost nothing from markup alone.
 _JSON_PATH = re.compile(r"[\"'](/[^\"']*?\.(?:jpe?g|png|webp))[\"']", re.I)
 
 
-def extract_image_urls(html: str, base_url: str, limit: int = MAX_IMAGES_PER_PAGE) -> list[str]:
-    """Pull plausible photo URLs out of a page, in a stable order."""
+def _attribute(tag: str, name: str) -> str:
+    match = re.search(rf"\b{re.escape(name)}\s*=\s*([\"'])(.*?)\1", tag, re.I | re.S)
+    return html_unescape(match.group(2)).strip() if match else ""
 
-    found: list[str] = []
-    seen: set[str] = set()
 
-    def add(raw: str) -> None:
-        candidate = raw.strip()
+def extract_images(
+    html: str, base_url: str, limit: int = MAX_IMAGES_PER_PAGE
+) -> list[tuple[str, str]]:
+    """Pull plausible ``(image URL, label)`` pairs out of a page in stable order.
+
+    The label matters after a face match. A page can associate ``gaurish.png`` with the
+    alt text ``Gaurish Baliga``; that page-derived full name is a much stronger search
+    hint than the filename, while the face gate still decides every resulting match.
+    """
+
+    found: list[tuple[str, str]] = []
+    positions: dict[str, int] = {}
+
+    def add(raw: str, label: str = "") -> None:
+        candidate = html_unescape(raw).strip()
         if not candidate or candidate.startswith("data:"):
             return
         absolute = urljoin(base_url, candidate)
-        if absolute in seen or _SKIP_PATTERN.search(absolute):
+        if _SKIP_PATTERN.search(absolute):
             return
         if not is_public_http_url(absolute):
             return
-        seen.add(absolute)
-        found.append(absolute)
+        clean_label = " ".join(html_unescape(label).split())[:500]
+        if absolute in positions:
+            index = positions[absolute]
+            if clean_label and not found[index][1]:
+                found[index] = (absolute, clean_label)
+            return
+        positions[absolute] = len(found)
+        found.append((absolute, clean_label))
 
     for match in _META_IMAGE.finditer(html):
         add(match.group(1))
-    for match in _IMG_SRC.finditer(html):
-        add(match.group(1))
-    for match in _IMG_SRCSET.finditer(html):
+    tags = _IMG_TAG.findall(html)
+    for tag in tags:
+        source = _attribute(tag, "src")
+        if source:
+            add(source, _attribute(tag, "alt"))
+    for tag in tags:
+        srcset = _attribute(tag, "srcset")
+        if not srcset:
+            continue
         # "a.jpg 1x, b.jpg 2x" -> take the largest, which is the last entry.
-        parts = [piece.strip().split(" ")[0] for piece in match.group(1).split(",")]
+        parts = [piece.strip().split(" ")[0] for piece in srcset.split(",")]
         if parts:
-            add(parts[-1])
+            add(parts[-1], _attribute(tag, "alt"))
     for match in _JSON_PATH.finditer(html):
         add(match.group(1))
 
     return found[:limit]
+
+
+def extract_image_urls(html: str, base_url: str, limit: int = MAX_IMAGES_PER_PAGE) -> list[str]:
+    """Backward-compatible URL-only view of :func:`extract_images`."""
+
+    return [url for url, _label in extract_images(html, base_url, limit)]
 
 
 class PageHarvestProvider:
@@ -154,11 +184,14 @@ class PageHarvestProvider:
             if not html:
                 continue
 
-            images = extract_image_urls(html, page)
-            result.raw[page] = {"images": len(images)}
+            images = extract_images(html, page)
+            result.raw[page] = {
+                "images": len(images),
+                "labels": {url: label for url, label in images if label},
+            }
             logger.info("page harvest %s: %d image(s)", page, len(images))
 
-            for index, image_url in enumerate(images):
+            for index, (image_url, label) in enumerate(images):
                 try:
                     canonical = canonicalize_url(page)
                     result.candidates.append(
@@ -169,7 +202,7 @@ class PageHarvestProvider:
                             # The page is one URL but yields many images, so the image
                             # itself has to distinguish them or dedupe collapses the lot.
                             post_id=f"img{index}",
-                            title=f"image {index + 1} on {urlsplit(page).netloc}",
+                            title=label or f"image {index + 1} on {urlsplit(page).netloc}",
                             image_url=image_url,
                             thumbnail_url=None,
                             search_rank=rank * 100 + index,
@@ -184,4 +217,10 @@ class PageHarvestProvider:
         return result
 
 
-__all__ = ["MAX_IMAGES_PER_PAGE", "MAX_PAGES", "PageHarvestProvider", "extract_image_urls"]
+__all__ = [
+    "MAX_IMAGES_PER_PAGE",
+    "MAX_PAGES",
+    "PageHarvestProvider",
+    "extract_image_urls",
+    "extract_images",
+]

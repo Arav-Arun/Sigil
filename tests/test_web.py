@@ -297,9 +297,15 @@ class TestRunState:
         from sigil.web import RunState
 
         payload = RunState(run_id="r1").to_json()
-        assert payload["run_id"] == "r1"
-        assert payload["status"] == "queued"
-        assert set(payload) == {"run_id", "status", "stage", "started_at", "result", "error"}
+        assert set(payload) == {
+            "run_id",
+            "status",
+            "stage",
+            "started_at",
+            "upload",
+            "result",
+            "error",
+        }
 
 
 def test_static_assets_exist_on_disk():

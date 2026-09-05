@@ -18,6 +18,7 @@ from __future__ import annotations
 import io
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -74,6 +75,10 @@ class CandidateVerification:
     # True when the small-face recovery path ran for this candidate. Recorded so a
     # decision that leaned on upscaling can be told apart from one that did not.
     rescanned: bool = False
+    # Whether the candidate is the query photograph itself (possibly re-encoded). Kept
+    # separate from the face decision: the same face in a different photograph is the
+    # useful discovery, while rediscovering the uploaded pixels is only provenance.
+    same_photo: bool = False
 
     @property
     def matched(self) -> bool:
@@ -101,6 +106,9 @@ class CandidateVerification:
             "best_face_px": self.best_face_px,
             "all_distances": [round(d, 6) for d in self.all_distances],
             "recognition_path": "multiscale" if self.rescanned else "plain",
+            "title": self.candidate.title,
+            "exact_match": self.candidate.exact_match,
+            "same_photo": self.same_photo,
             "decision": self.decision.model_dump(mode="json"),
             "margin": round(self.margin, 6),
         }
@@ -117,6 +125,47 @@ def decode_media(media: FetchedMedia) -> np.ndarray | None:
     except Exception as exc:  # Pillow raises a wide family of decode errors
         logger.debug("could not decode media for %s: %s", media.candidate.source_url, exc)
         return None
+
+
+def is_same_photo(query_path: str | Path, media: FetchedMedia) -> bool:
+    """Recognise the uploaded photograph after ordinary resizing or recompression.
+
+    Byte hashes alone miss the common case where a search engine returns the same pixels
+    as a JPEG or thumbnail. The full-image comparison below combines a small colour error
+    with a difference-hash check. It does not participate in face identity; it only lets
+    the UI and ranking distinguish an exact-photo rediscovery from another photograph of
+    the verified person.
+    """
+
+    if not media.ok:
+        return False
+    try:
+        with Image.open(query_path) as source_image:
+            source = ImageOps.exif_transpose(source_image).convert("RGB")
+            source.load()
+        with Image.open(io.BytesIO(media.data)) as candidate_image:
+            candidate = ImageOps.exif_transpose(candidate_image).convert("RGB")
+            candidate.load()
+    except (OSError, ValueError):
+        return False
+
+    source_ratio = source.width / source.height
+    candidate_ratio = candidate.width / candidate.height
+    if abs(source_ratio - candidate_ratio) > 0.03:
+        return False
+
+    size = (64, 64)
+    source_small = np.asarray(source.resize(size, Image.Resampling.LANCZOS), dtype=np.int16)
+    candidate_small = np.asarray(candidate.resize(size, Image.Resampling.LANCZOS), dtype=np.int16)
+    mean_error = float(np.abs(source_small - candidate_small).mean())
+
+    def difference_hash(image: Image.Image) -> np.ndarray:
+        gray = image.convert("L").resize((17, 16), Image.Resampling.LANCZOS)
+        pixels = np.asarray(gray, dtype=np.int16)
+        return pixels[:, 1:] > pixels[:, :-1]
+
+    hash_error = float(np.not_equal(difference_hash(source), difference_hash(candidate)).mean())
+    return mean_error <= 6.0 and hash_error <= 0.04
 
 
 def verify_candidate(
@@ -258,7 +307,12 @@ def rank(verifications: list[CandidateVerification]) -> list[CandidateVerificati
     # deliverable is a social-media post and a news photograph, however sharp, is not one.
     # This orders matches; it cannot create one. A candidate the face gate rejected is not
     # in this list at all, so no amount of platform preference can promote it.
-    return sorted(matches, key=lambda item: (not item.candidate.is_social, -score(item)))
+    return sorted(
+        matches,
+        # An independently found photograph is the useful result. The query photo remains
+        # visible and auditable, but cannot outrank an alternate verified photograph.
+        key=lambda item: (item.same_photo, not item.candidate.is_social, -score(item)),
+    )
 
 
 def verify_all(
@@ -296,6 +350,7 @@ __all__ = [
     "MIN_CANDIDATE_FACE_PX",
     "CandidateVerification",
     "decode_media",
+    "is_same_photo",
     "rank",
     "verify_all",
     "verify_candidate",

@@ -29,7 +29,12 @@ from sigil.search.quota import (
     SearchBudget,
     check_reserve,
 )
-from sigil.search.routes import infer_entities, merge_candidates, parse_candidates
+from sigil.search.routes import (
+    infer_entities,
+    merge_candidates,
+    parse_candidates,
+    select_candidates,
+)
 from sigil.search.serpapi import UploadedImage
 
 NOW = datetime(2026, 9, 2, 12, 0, tzinfo=UTC)
@@ -325,6 +330,101 @@ class TestMergeCandidates:
             ]
         )
         assert str(merged[0].source_url) == "https://x.com/a/status/1"
+
+
+class TestSelectCandidates:
+    def _candidate(self, number: int, route: str, *, exact: bool = False):
+        from sigil.models import SearchCandidate
+
+        return SearchCandidate(
+            source_url=f"https://x.com/person/status/{number}",
+            platform="x",
+            is_social=True,
+            post_id=str(number),
+            search_rank=number,
+            exact_match=exact,
+            discovered_at=NOW,
+            search_routes=[route],
+        )
+
+    def test_a_noisy_full_image_route_cannot_crowd_out_face_results(self):
+        candidates = [self._candidate(i, "R1:lens-all-full") for i in range(1, 21)]
+        candidates += [self._candidate(100 + i, "R3:lens-all-face") for i in range(1, 5)]
+
+        selected = select_candidates(candidates, 6)
+
+        routes = [route for candidate in selected for route in candidate.search_routes]
+        assert routes.count("R1:lens-all-full") == 3
+        assert routes.count("R3:lens-all-face") == 3
+
+    def test_an_exact_result_is_retained_but_does_not_take_every_slot(self):
+        candidates = [
+            self._candidate(1, "R1:lens-all-full", exact=True),
+            *[self._candidate(i, "R1:lens-all-full") for i in range(2, 10)],
+            self._candidate(100, "R3:lens-all-face"),
+        ]
+
+        selected = select_candidates(candidates, 3)
+
+        assert selected[0].exact_match is True
+        assert any("R3:lens-all-face" in candidate.search_routes for candidate in selected)
+
+
+def test_discover_always_runs_portrait_and_face_routes_when_full_image_is_noisy(monkeypatch):
+    from sigil.config import Settings
+    from sigil.search.quota import SearchBudget
+    from sigil.search.routes import discover
+
+    class FakeCache:
+        def __init__(self):
+            self.stats = {}
+
+    class FakeClient:
+        def __init__(self):
+            self.budget = SearchBudget(limit=4)
+            self.search_records = []
+            self.cache = FakeCache()
+            self.routes = []
+
+        def upload_image(self, path):
+            return UploadedImage(str(path), str(path))
+
+        def lens(self, uploaded, *, route, **kwargs):
+            self.budget.spend(route)
+            self.routes.append(route)
+            offset = {"R1:lens-all-full": 0, "R2:lens-all-portrait": 100, "R3:lens-all-face": 200}[
+                route
+            ]
+            count = 12 if route == "R1:lens-all-full" else 2
+            return {
+                "visual_matches": [
+                    {
+                        "position": i + 1,
+                        "title": f"result {offset + i}",
+                        "link": f"https://x.com/person/status/{offset + i}",
+                        "thumbnail": f"https://img.example.com/{offset + i}.jpg",
+                    }
+                    for i in range(count)
+                ]
+            }
+
+    client = FakeClient()
+    result = discover(
+        "whole.jpg",
+        "portrait.jpg",
+        "face.jpg",
+        settings=Settings(_env_file=None),
+        client=client,
+        max_results=6,
+    )
+
+    assert set(client.routes) == {
+        "R1:lens-all-full",
+        "R2:lens-all-portrait",
+        "R3:lens-all-face",
+    }
+    selected_routes = {route for item in result["candidates"] for route in item.search_routes}
+    assert selected_routes == set(client.routes)
 
 
 class TestInferEntities:

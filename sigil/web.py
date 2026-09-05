@@ -44,6 +44,7 @@ class RunState:
     status: str = "queued"  # queued | running | done | error
     stage: str = ""
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    upload: str = ""
     result: dict[str, Any] | None = None
     error: str = ""
 
@@ -53,6 +54,7 @@ class RunState:
             "status": self.status,
             "stage": self.stage,
             "started_at": self.started_at.isoformat(),
+            "upload": self.upload,
             "result": self.result,
             "error": self.error,
         }
@@ -117,6 +119,7 @@ def _start_run(
     image_path: Path,
     settings: Settings,
     *,
+    upload_url: str = "",
     skip_chain: bool,
     no_cache: bool,
     largest: bool,
@@ -128,7 +131,7 @@ def _start_run(
 
     started_at = datetime.now(UTC)
     run_id = f"{started_at:%Y%m%dT%H%M%S%fZ}-{sha256_file(image_path)[:8]}"
-    state = RunState(run_id=run_id, started_at=started_at)
+    state = RunState(run_id=run_id, started_at=started_at, upload=upload_url)
     with RUNS_LOCK:
         RUNS[run_id] = state
 
@@ -194,6 +197,7 @@ class SigilHandler(BaseHTTPRequestHandler):
             run_id = _start_run(
                 target,
                 self.settings,
+                upload_url=f"/samples/{target.name}",
                 skip_chain=flag("skip_chain"),
                 no_cache=flag("no_cache"),
                 largest=flag("largest"),
@@ -217,7 +221,7 @@ class SigilHandler(BaseHTTPRequestHandler):
             "Content-Security-Policy",
             "default-src 'self'; script-src 'self' 'unsafe-inline'; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-            "font-src https://fonts.gstatic.com; img-src 'self' data: https:; "
+            "font-src https://fonts.gstatic.com; img-src 'self' data: blob: https:; "
             "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; "
             "form-action 'self'",
         )
@@ -389,6 +393,7 @@ class SigilHandler(BaseHTTPRequestHandler):
             run_id = _start_run(
                 upload_path,
                 self.settings,
+                upload_url=f"/uploads/{upload_path.name}",
                 skip_chain=flag("skip_chain"),
                 no_cache=flag("no_cache"),
                 largest=flag("largest"),
