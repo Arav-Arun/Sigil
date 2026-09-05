@@ -51,16 +51,14 @@ On the architecture diagram, change **“above match threshold”** to **“cosi
 
 > The search audit shows every discovery source and whether each provider call was live or cached. Full report gives us the complete run rather than only the winner: every candidate, its image, distance, face count, decision reason, timing, evidence root, and blockchain receipt. If an image contains several people, Sigil checks every detected face. If there is no usable face or the result is uncertain, it reports that honestly instead of guessing.
 
-**Show the evidence root, click the Etherscan transaction link, then click Verify independently.**
+**Point to the evidence root and click View transaction on Etherscan.**
 
-> For the verified result, Sigil creates an evidence bundle containing hashes of the images and search response, together with the source URL, model information, threshold, and final decision.
->
-> These fields are combined into one Merkle root and submitted to our smart contract on Ethereum Sepolia. This Etherscan page proves that the blockchain transaction succeeded. Only the root is stored; the photograph and face embedding remain off-chain.
->
-> Finally, Verify independently rebuilds the root from the evidence and confirms that the same root exists in the contract. Etherscan proves the transaction exists, and this check proves that our evidence matches it. If anything changes, verification fails.
->
-> This is also available from the Verify Evidence button, where another person can load a shared evidence bundle and check it without our private key. The New search button resets the interface for another input.
->
-> Sigil therefore completes the full challenge end to end: face identification, genuine web and social discovery, blockchain anchoring, and independent tamper verification.
+> Once the face is verified, Sigil hashes the complete result into one Merkle root and submits it to our smart contract on Ethereum Sepolia. This Etherscan page shows the real successful blockchain transaction. Only the root is stored on-chain, not the photograph or face embedding.
 
-**Finish on the successful verification result.**
+**Return to Sigil, click Verify independently, and point to Evidence intact and Anchored on-chain.**
+
+> Sigil now rebuilds the root from the saved evidence and checks the same root against the smart contract. Etherscan proves that the transaction exists, while these two green checks prove that our current evidence matches it. This read-only verification needs no wallet or private key.
+>
+> That completes the full pipeline: face identification, real web and social discovery, blockchain anchoring, and independent tamper verification.
+
+**Finish on the two successful verification checks.**
