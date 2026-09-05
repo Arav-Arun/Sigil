@@ -42,7 +42,6 @@ dev = [
     "mypy>=1.17,<2",
     "pytest>=8.4,<9",
     "pytest-cov>=6.2,<8",
-    "respx>=0.22,<1",
     "ruff>=0.12,<1",
     "types-requests>=2.32,<3",
 ]

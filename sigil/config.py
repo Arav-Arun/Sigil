@@ -64,7 +64,6 @@ class Settings(BaseSettings):
     http_retries: int = Field(default=2, ge=0, le=5)
     search_country: str = Field(default="in", min_length=2, max_length=2)
     search_language: str = Field(default="en", min_length=2, max_length=2)
-    social_domains: tuple[str, ...] = SOCIAL_DOMAINS
 
     @field_validator("contract_address")
     @classmethod

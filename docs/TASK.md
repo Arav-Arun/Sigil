@@ -109,7 +109,15 @@ the three is ever dressed up as a success.
 **Search never decides identity.** Candidates are ranked only after they pass the face
 gate, so a result that came first in the search cannot be promoted past verification. A
 lookalike surfaced by the entity-pivot route is still rejected when its face distance is
-outside the calibrated gate.
+outside the calibrated gate. Ranking among verified matches is the distance margin alone,
+the only calibrated quantity available to it.
+
+**The whole verified set is recorded, not only the winner.** The manifest commits to how
+many candidates passed, how many are distinct photographs rather than reposts of the
+submitted image, the best and runner-up distances, and the media digests of every verified
+candidate. One candidate that scraped past the threshold and four that cleared it
+comfortably are different claims, and anchoring only the winner could not tell them
+apart.
 
 ---
 
@@ -143,9 +151,29 @@ sigil verify --bundle data/bundles/<run-id>
 ```
 
 This works from a clean checkout with `CONTRACT_ADDRESS` and `SEPOLIA_RPC_URL` **both
-unset**: the registry address is read from the bundle's own receipt and a public Sepolia
-endpoint is used. A committed bundle is included at
+unset**, falling back to a public Sepolia endpoint. A committed bundle is included at
 [`docs/example-bundle/`](example-bundle/) so this can be checked without running a search.
+
+**Which registry is read, and why the order matters.** Configuration wins, then the
+checked-in `deployments/sepolia.json`, and only then the bundle's own `receipt.json`. The
+receipt is last on purpose: it travels with the evidence, so a tampered one must not be
+able to redirect an otherwise clean verifier.
+
+**The contract's identity is checked before its answer is believed.** A `true` from
+`verify(root)` proves only that *some* contract said yes, and a look-alike with the same
+ABI can say yes to everything. Both verifiers hash the deployed runtime bytecode with
+`eth_getCode` and compare it against the digest recorded at deploy time:
+
+```console
+$ sigil verify --bundle docs/example-bundle
+  ✓ registry: runtime bytecode matches the recorded registry (c5708dce1ff2…)
+
+$ CONTRACT_ADDRESS=<a different real Sepolia contract> sigil verify --bundle docs/example-bundle
+on-chain check failed: the contract at 0xfFf9…6B14 is not SigilRegistry   # exit 3
+```
+
+The check is three-state. `unrecorded`, for a chain with no committed deployment such as a
+local node, is reported as such and never as a pass.
 
 ---
 
