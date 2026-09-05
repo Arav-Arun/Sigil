@@ -48,6 +48,7 @@ from sigil.search.normalize import (
     detect_platform,
     extract_post_id,
     is_candidate_url,
+    is_public_http_url,
     is_social_url,
 )
 from sigil.search.providers.base import ProviderResult, run_providers
@@ -100,8 +101,28 @@ def parse_candidates(
         link = item.get("link") or item.get("source")
         if not isinstance(link, str) or not is_candidate_url(link):
             continue
-        image_url = item.get("original") or item.get("image") or None
+        image_url = item.get("original") or item.get("image") or item.get("primary_image") or None
         thumbnail_url = item.get("thumbnail") or None
+        if not thumbnail_url and isinstance(item.get("pagemap"), dict):
+            cse_image = item["pagemap"].get("cse_image")
+            if isinstance(cse_image, list) and cse_image and isinstance(cse_image[0], dict):
+                src = cse_image[0].get("src")
+                if isinstance(src, str) and is_public_http_url(src):
+                    thumbnail_url = src
+            if not thumbnail_url:
+                metatags = item["pagemap"].get("metatags")
+                if isinstance(metatags, list) and metatags and isinstance(metatags[0], dict):
+                    og = metatags[0].get("og:image")
+                    if isinstance(og, str) and is_public_http_url(og):
+                        thumbnail_url = og
+        if not thumbnail_url and isinstance(item.get("rich_snippet"), dict):
+            top = item["rich_snippet"].get("top", {})
+            if isinstance(top, dict):
+                ext = top.get("detected_extensions", {})
+                if isinstance(ext, dict):
+                    img = ext.get("image")
+                    if isinstance(img, str) and is_public_http_url(img):
+                        thumbnail_url = img
         if not image_url and not thumbnail_url:
             continue
         try:
@@ -185,12 +206,13 @@ def infer_entities(payload: dict[str, Any], limit: int = 3) -> list[str]:
 # Google degrades badly on long site: disjunctions: an eleven-way OR chain reliably
 # returned nothing at all for a name that plainly has social coverage. Four platforms is
 # the point where it still behaves, and they are the four that carry personal posts.
-PIVOT_DOMAINS = ("instagram.com", "x.com", "facebook.com", "linkedin.com")
+PIVOT_DOMAINS = ("instagram.com", "x.com", "facebook.com", "linkedin.com", "youtube.com")
 
 
 def _site_query(entity: str, domains: tuple[str, ...] = PIVOT_DOMAINS) -> str:
+    cleaned = entity.strip().strip('"\'')
     sites = " OR ".join(f"site:{domain}" for domain in domains)
-    return f'"{entity}" ({sites})'
+    return f'"{cleaned}" ({sites})' if cleaned else sites
 
 
 def merge_candidates(candidates: list[SearchCandidate]) -> list[SearchCandidate]:

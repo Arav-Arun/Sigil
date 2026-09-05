@@ -155,13 +155,16 @@ class FaceIndex:
     @classmethod
     def load(cls, path: Path) -> FaceIndex:
         with np.load(path, allow_pickle=True) as data:
+            raw_stats = json.loads(str(data["stats"]))
             stats = IndexStats(
                 **{
                     k: v
-                    for k, v in json.loads(str(data["stats"])).items()
+                    for k, v in raw_stats.items()
                     if k in IndexStats.__slots__
                 }
             )
+            if path.exists():
+                stats.bytes_on_disk = path.stat().st_size
             return cls(
                 embeddings=data["embeddings"].astype(np.float32),
                 labels=list(data["labels"]),

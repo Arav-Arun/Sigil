@@ -109,16 +109,6 @@
   .dz .l1 { font-size:20px; font-weight:600; color:var(--purple); margin-top:10px; }
   .dz .l2 { font-size:20px; font-weight:600; color:var(--orange); }
   .dz .l3 { font-size:14.5px; font-weight:500; color:var(--purple-soft); margin-top:9px; }
-  .namefield { display:block; margin-top:18px; text-align:left; }
-  .namefield > span { display:block; font-size:14px; font-weight:600; color:var(--purple-mid);
-                      margin-bottom:7px; }
-  .namefield input { width:100%; border:1px solid #e3e3f0; border-radius:8px;
-                     padding:11px 13px; font:500 15px/1.3 "Noto Sans",sans-serif;
-                     color:var(--purple); background:var(--white); }
-  .namefield input:focus { outline:none; border-color:var(--indigo); }
-  .namefield em { display:block; font-style:normal; font-size:13px; line-height:1.55;
-                  color:var(--purple-soft); margin-top:8px; }
-
   /* clickable sample gallery */
   .try { margin-top:28px; }
   .try .cap { font-size:15px; color:var(--purple-mid); margin-bottom:12px; }
@@ -156,42 +146,61 @@
   .pill-f { position:absolute; background:var(--lav); color:var(--purple); border-radius:100px;
             padding:8px 12px; font-size:15px; font-weight:600; }
   @media (max-width:1120px) { .tile-f, .pill-f { display:none; } }
-  /* measured-numbers strip, where a marketing page would put press logos */
-  .strip { max-width:1000px; margin:34px auto 0; display:flex; flex-wrap:wrap;
-           justify-content:center; gap:14px 42px; padding:22px 24px;
-           border-top:1px solid #ececf6; }
-  .strip div { text-align:center; }
-  .strip .v { font-size:20px; font-weight:700; color:var(--ink); letter-spacing:-.01em;
-              font-variant-numeric:tabular-nums; }
-  .strip .k { font-size:15px; font-weight:600; color:var(--purple-soft); margin-top:2px; }
-  .strip .src { flex:0 0 100%; text-align:center; font-size:13.5px; color:#a5a4c0; margin-top:4px; }
+
   /* ══════════ architecture diagram ══════════ */
-  .arch { max-width:1180px; margin:0 auto; background:var(--white); border-radius:16px;
-          padding:30px 26px 22px; box-shadow:var(--shadow-lg); }
-  .arch svg { width:100%; height:auto; display:block; overflow:visible; }
-  .arch .lbl { font:700 13px/1 "Noto Sans",sans-serif; fill:var(--purple-soft);
+  .arch { max-width:1180px; margin:0 auto; background:var(--white); border:1px solid #e7e7f2;
+          border-radius:16px; padding:26px; box-shadow:var(--shadow-sm); }
+  .arch-flow { display:grid;
+               grid-template-columns:minmax(150px,.82fr) 34px minmax(270px,1.45fr) 34px
+                                     minmax(190px,1fr) 34px minmax(190px,1fr);
+               gap:10px; align-items:stretch; }
+  .arch-stage { min-width:0; border:1px solid #dedef0; border-radius:12px; padding:18px;
+                background:#fbfbff; overflow:hidden; }
+  .arch-step { margin-bottom:20px; color:var(--purple-soft); font-size:12px; font-weight:700;
                letter-spacing:.06em; text-transform:uppercase; }
-  .arch .box-t { font:700 15px/1 "Noto Sans",sans-serif; fill:var(--ink); }
-  .arch .box-s { font:500 12.5px/1 "Noto Sans",sans-serif; fill:var(--purple-soft); }
-  .arch .chip-t { font:600 13px/1 "Noto Sans",sans-serif; fill:var(--purple); }
-  .arch .chip-s { font:500 11.5px/1 "Noto Sans",sans-serif; fill:var(--purple-soft); }
-  .arch .card-bg { fill:var(--lav-soft); stroke:#dcdcf2; stroke-width:1.4; }
-  .arch .card-hi { fill:var(--lav); stroke:var(--indigo); stroke-width:1.7; }
-  .arch .card-gate { fill:#e7f7ee; stroke:var(--ok); stroke-width:1.7; }
-  .arch .card-chain { fill:#1a1836; stroke:#3a3570; stroke-width:1.4; }
-  .arch .chain-t { font:700 15px/1 "Noto Sans",sans-serif; fill:#c9ccff; }
-  .arch .chain-s { font:500 12.5px/1 "Noto Sans",sans-serif; fill:#9a97c8; }
-  .arch .wire { fill:none; stroke:#c9c8e8; stroke-width:1.8; }
-  .arch .wire-hi { fill:none; stroke:var(--indigo); stroke-width:2.2; }
-  .arch .flowing { stroke-dasharray:6 7; animation:flow 1.5s linear infinite; }
-  @keyframes flow { to { stroke-dashoffset:-26; } }
-  .arch .badge { font:700 11px/1 "Noto Sans",sans-serif; fill:#fff; letter-spacing:.04em; }
-  .arch-key { display:flex; flex-wrap:wrap; gap:8px 20px; justify-content:center;
-              margin-top:20px; padding-top:18px; border-top:1px solid #ececf6; }
-  .arch-key span { display:flex; align-items:center; gap:7px; font-size:13px;
-                   color:var(--purple-soft); }
-  .arch-key i { width:11px; height:11px; border-radius:3px; display:block; }
-  @media (prefers-reduced-motion:reduce) { .arch .flowing { animation:none; } }
+  .arch-stage h3 { margin:0 0 9px; color:var(--ink); font-size:18px; line-height:1.25; }
+  .arch-stage p { margin:0; color:var(--purple-soft); font-size:14px; line-height:1.55;
+                  overflow-wrap:anywhere; }
+  .arch-stage p + p { margin-top:7px; }
+  .arch-note { margin-top:18px; padding-top:13px; border-top:1px solid #e5e5f1;
+               color:var(--purple); font-size:12.5px; font-weight:600; line-height:1.45; }
+  .arch-face { border-color:#aeb4ff; background:#f5f5ff; }
+  .arch-discover { padding:18px; }
+  .arch-sources { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
+  .arch-source { min-width:0; padding:12px 12px 12px 14px; border:1px solid #e0e0ee;
+                 border-left:4px solid var(--source); border-radius:8px; background:#fff; }
+  .arch-source strong { display:block; color:var(--purple); font-size:14px; line-height:1.25; }
+  .arch-source span { display:block; margin-top:4px; color:var(--purple-soft); font-size:12px;
+                      line-height:1.4; overflow-wrap:anywhere; }
+  .arch-gate { border-color:#65b989; background:#f2fbf6; }
+  .arch-outcomes { display:flex; flex-wrap:wrap; gap:6px 12px; margin-top:17px; color:#256846;
+                   font-size:12px; font-weight:700; text-transform:uppercase; }
+  .arch-outcomes span + span::before { content:"\00b7"; margin-right:12px; color:#91a999; }
+  .arch-seal { display:flex; flex-direction:column; }
+  .arch-chain { margin-top:18px; padding:14px; border-radius:9px; background:#1a1836; }
+  .arch-chain strong { display:block; color:#d2d4ff; font-size:15px; }
+  .arch-chain span { display:block; margin-top:6px; color:#aaa8ce; font-size:12.5px;
+                     line-height:1.45; }
+  .arch-verify { margin-top:auto; padding-top:14px; color:var(--purple-soft); font-size:12.5px;
+                 line-height:1.45; }
+  .arch-verify strong { display:block; margin-bottom:3px; color:var(--purple); }
+  .arch-arrow { min-width:0; display:flex; flex-direction:column; align-items:center;
+                justify-content:center; gap:5px; color:var(--indigo); }
+  .arch-arrow span { color:var(--purple-soft); font-size:10.5px; font-weight:600; }
+  .arch-arrow::after { content:"→"; font-size:24px; line-height:1; }
+  @media (max-width:980px) {
+    .arch-flow { grid-template-columns:1fr; }
+    .arch-arrow { min-height:34px; flex-direction:row; }
+    .arch-arrow::after { content:"↓"; }
+    .arch-step { margin-bottom:12px; }
+    .arch-verify { margin-top:18px; }
+  }
+  @media (max-width:520px) {
+    .arch { margin:0 -12px; padding:14px; border-radius:12px; }
+    .arch-stage { padding:15px; }
+    .arch-sources { grid-template-columns:1fr; }
+    .arch-outcomes span + span::before { display:none; }
+  }
 
   /* ══════════ explainer ══════════ */
   .explain { padding:16px 24px 90px; }
@@ -457,27 +466,15 @@
         </svg>
         <div class="l1">Drop, paste</div>
         <div class="l2">or upload an image</div>
-        <div class="l3">JPEG, PNG or WebP, and it never leaves this machine</div>
+        <div class="l3">JPEG, PNG or WebP. A compressed copy is sent to the search provider.</div>
         <input type="file" id="file" accept="image/jpeg,image/png,image/webp" hidden>
       </div>
-
-      <label class="namefield">
-        <span>Optional: a name to search alongside the face</span>
-        <input type="text" id="nameHint" placeholder="e.g. Colin Powell" spellcheck="false"
-               autocomplete="off">
-        <em>Reverse-image search only infers a name for people it already recognises, so
-            without one the pipeline cannot look anywhere a face index has not already been.
-            A name decides where to look and nothing else: every page it reaches still has to
-            pass the face gate.</em>
-      </label>
     </div>
 
     <div class="try hidden" id="try">
       <div class="samples" id="samples"></div>
     </div>
   </div>
-
-  <div class="strip" id="strip"></div>
 </section>
 
 <!-- ══════════ HOW IT WORKS ══════════ -->
@@ -561,105 +558,69 @@
 
   <div class="ex-head reveal" style="margin-top:78px">
     <div class="eyebrow">Architecture</div>
-    <h2>One face in, four independent sources, one sealed record out</h2>
-    <p>Nothing here is a wrapper around a single API. Sources that fail in different ways
-       run at once, and every candidate any of them returns has to pass the same face gate.</p>
+    <h2>From face scan to a verifiable record</h2>
+    <p>Four discovery sources broaden the search. Face comparison remains the only identity
+       gate, and the final fingerprint can be checked against the public chain.</p>
   </div>
 
   <div class="arch reveal">
-    <svg viewBox="0 0 1120 400" role="img"
-         aria-label="Sigil pipeline: face encoding, a concurrent fan-out across four search
-                     sources, a face gate, then a Merkle root anchored on Sepolia.">
+    <div class="arch-flow" role="img"
+         aria-label="A face scan is searched across four sources. Every candidate passes
+                     face comparison before an evidence fingerprint is recorded on Sepolia.">
+      <section class="arch-stage arch-face">
+        <div class="arch-step">01 / Prepare face</div>
+        <h3>Face scan</h3>
+        <p>Detect and align the face.</p>
+        <p>Build a comparison signature.</p>
+        <div class="arch-note">The signature stays in memory and is never put on chain.</div>
+      </section>
 
-      <text class="lbl" x="0" y="14">1 · Encode</text>
-      <rect class="card-hi" x="0" y="28" width="176" height="104" rx="12"/>
-      <text class="box-t" x="16" y="56">Face engine</text>
-      <text class="box-s" x="16" y="78">SCRFD det_10g</text>
-      <text class="box-s" x="16" y="97">ArcFace w600k_r50</text>
-      <text class="box-s" x="16" y="116">512-d, stays in memory</text>
+      <div class="arch-arrow" aria-hidden="true"><span>face</span></div>
 
-      <text class="lbl" x="238" y="14">2 · Search, concurrently</text>
+      <section class="arch-stage arch-discover">
+        <div class="arch-step">02 / Discover</div>
+        <div class="arch-sources">
+          <div class="arch-source" style="--source:#d67419">
+            <strong>SerpApi</strong><span>Lens and web results</span>
+          </div>
+          <div class="arch-source" style="--source:#5a66e9">
+            <strong>Exa</strong><span>Related public pages</span>
+          </div>
+          <div class="arch-source" style="--source:#1d9a57">
+            <strong>Wikidata</strong><span>Curated public portraits</span>
+          </div>
+          <div class="arch-source" style="--source:#c07b12">
+            <strong>Page crawler</strong><span>Additional page photos</span>
+          </div>
+        </div>
+        <div class="arch-note">Sources run independently, so one failure does not stop the search.</div>
+      </section>
 
-      <rect class="card-bg" x="238" y="28" width="250" height="62" rx="10"/>
-      <rect x="238" y="28" width="5" height="62" rx="2.5" fill="#d67419"/>
-      <text class="chip-t" x="258" y="52">SerpApi · Google Lens</text>
-      <text class="chip-s" x="258" y="72">type=all: visual matches, pages, entity</text>
+      <div class="arch-arrow" aria-hidden="true"><span>candidates</span></div>
 
-      <rect class="card-bg" x="238" y="100" width="250" height="62" rx="10"/>
-      <rect x="238" y="100" width="5" height="62" rx="2.5" fill="#d67419"/>
-      <text class="chip-t" x="258" y="124">SerpApi · Web</text>
-      <text class="chip-s" x="258" y="144">the inferred name, site:-restricted</text>
+      <section class="arch-stage arch-gate">
+        <div class="arch-step">03 / Verify identity</div>
+        <h3>Fetch and compare</h3>
+        <p>Download candidate media and compare every detected face with the input.</p>
+        <div class="arch-outcomes"><span>Match</span><span>Unsure</span><span>No match</span></div>
+        <div class="arch-note">Search rank never decides identity.</div>
+      </section>
 
-      <rect class="card-bg" x="238" y="172" width="250" height="62" rx="10"/>
-      <rect x="238" y="172" width="5" height="62" rx="2.5" fill="#5a66e9"/>
-      <text class="chip-t" x="258" y="196">Exa · neural retrieval</text>
-      <text class="chip-s" x="258" y="216">pages about a person, not keywords</text>
+      <div class="arch-arrow" aria-hidden="true"><span>match</span></div>
 
-      <rect class="card-bg" x="238" y="244" width="250" height="62" rx="10"/>
-      <rect x="238" y="244" width="5" height="62" rx="2.5" fill="#1d9a57"/>
-      <text class="chip-t" x="258" y="268">Wikidata · Commons</text>
-      <text class="chip-s" x="258" y="288">curated portraits, no key, no quota</text>
-
-      <rect class="card-bg" x="238" y="316" width="250" height="62" rx="10"/>
-      <rect x="238" y="316" width="5" height="62" rx="2.5" fill="#c07b12"/>
-      <text class="chip-t" x="258" y="340">Page harvest</text>
-      <text class="chip-s" x="258" y="360">every photo on a page, not just one</text>
-
-      <path class="wire flowing" d="M176 80 H207 V59 H238"/>
-      <path class="wire flowing" d="M207 80 V131 H238"/>
-      <path class="wire flowing" d="M207 80 V203 H238"/>
-      <path class="wire flowing" d="M207 80 V275 H238"/>
-      <path class="wire flowing" d="M207 80 V347 H238"/>
-
-      <path class="wire" d="M488 59  H520 V203"/>
-      <path class="wire" d="M488 131 H520"/>
-      <path class="wire" d="M488 203 H520"/>
-      <path class="wire" d="M488 275 H520 V203"/>
-      <path class="wire" d="M488 347 H520 V203"/>
-      <path class="wire-hi flowing" d="M520 203 H560"/>
-
-      <text class="lbl" x="560" y="14">3 · Decide</text>
-      <rect class="card-gate" x="560" y="150" width="196" height="106" rx="12"/>
-      <text class="box-t" x="576" y="178">Face gate</text>
-      <text class="box-s" x="576" y="200">every candidate fetched</text>
-      <text class="box-s" x="576" y="219">and compared, all faces</text>
-      <text class="box-s" x="576" y="238">match · non-match · unsure</text>
-
-      <rect x="576" y="272" width="164" height="26" rx="6" fill="#fdedec"/>
-      <text class="chip-s" x="588" y="289" fill="#e0453f">rank never grants identity</text>
-
-      <path class="wire-hi flowing" d="M756 203 H812"/>
-
-      <text class="lbl" x="812" y="14">4 · Seal</text>
-      <rect class="card-hi" x="812" y="120" width="176" height="76" rx="12"/>
-      <text class="box-t" x="828" y="148">Merkle root</text>
-      <text class="box-s" x="828" y="169">RFC 8785 canonical JSON</text>
-      <text class="box-s" x="828" y="187">per-field inclusion proofs</text>
-
-      <path class="wire-hi flowing" d="M900 196 V232"/>
-
-      <rect class="card-chain" x="812" y="232" width="176" height="82" rx="12"/>
-      <text class="chain-t" x="828" y="260">Sepolia</text>
-      <text class="chain-s" x="828" y="281">SigilRegistry.anchor()</text>
-      <text class="chain-s" x="828" y="299">32 bytes, nothing personal</text>
-
-      <path class="wire" d="M900 314 V344 H700"/>
-      <rect class="card-bg" x="524" y="330" width="176" height="62" rx="10"/>
-      <text class="chip-t" x="540" y="354">Re-verify</text>
-      <text class="chip-s" x="540" y="374">read-only eth_call, no wallet</text>
-
-      <rect x="0" y="330" width="176" height="62" rx="10" class="card-bg"/>
-      <text class="chip-t" x="16" y="354">Local face index</text>
-      <text class="chip-s" x="16" y="374">exact NN over what we hold</text>
-      <path class="wire" d="M88 330 V80" stroke-dasharray="4 5"/>
-    </svg>
-
-    <div class="arch-key">
-      <span><i style="background:#d67419"></i>SerpApi</span>
-      <span><i style="background:#5a66e9"></i>Exa</span>
-      <span><i style="background:#1d9a57"></i>No credential needed</span>
-      <span><i style="background:#c07b12"></i>Our own crawler</span>
-      <span><i style="background:#1a1836"></i>On-chain</span>
+      <section class="arch-stage arch-seal">
+        <div class="arch-step">04 / Seal and record</div>
+        <h3>Evidence fingerprint</h3>
+        <p>Binds the post and comparison details, while preserving which detail changed.</p>
+        <div class="arch-chain">
+          <strong>Sepolia record</strong>
+          <span>Fingerprint and timestamp only. No photo or face signature.</span>
+        </div>
+        <div class="arch-verify">
+          <strong>Independent verification</strong>
+          Compare saved evidence with the public record. No wallet is required.
+        </div>
+      </section>
     </div>
   </div>
 
@@ -675,14 +636,14 @@
 
     <div class="demo reveal">
       <div class="dcol">
-        <div class="dlabel">Evidence fields</div>
+        <div class="dlabel">Evidence details</div>
         <div class="fields" id="mkFields"></div>
         <button class="btn btn-ghost" id="mkTamper" type="button">Change one character</button>
         <button class="btn btn-ghost" id="mkReset" type="button">Reset</button>
       </div>
 
       <div class="dcol dtree">
-        <div class="dlabel">Merkle tree</div>
+        <div class="dlabel">How the fingerprint is built</div>
         <svg class="tree" viewBox="0 0 300 150" aria-hidden="true">
           <path class="tl" d="M150 34v14M150 48 90 66M150 48l60 18M90 80v14M90 94 56 110M90 94l34 16M210 80v14M210 94l-34 16M210 94l34 16"/>
           <rect class="tn root" x="122" y="14" width="56" height="20" rx="5"/>
@@ -693,17 +654,17 @@
           <rect class="tn leaf" data-leaf="2" x="154" y="108" width="44" height="18" rx="4"/>
           <rect class="tn leaf" data-leaf="3" x="222" y="108" width="44" height="18" rx="4"/>
         </svg>
-        <div class="dlabel">Root</div>
+        <div class="dlabel">Fingerprint</div>
         <div class="root mono" id="mkRoot">computing…</div>
       </div>
 
       <div class="dcol">
-        <div class="dlabel">On chain</div>
+        <div class="dlabel">Saved reference</div>
         <div class="chip-card">
-          <div class="crow"><span>root</span><b class="mono" id="mkAnchored">…</b></div>
-          <div class="crow"><span>submitter</span><b class="mono">0xdBB0…E8DC</b></div>
-          <div class="crow"><span>anchored</span><b class="mono">block 11621561</b></div>
-          <div class="crow"><span>schema</span><b class="mono">v1</b></div>
+          <div class="crow"><span>fingerprint</span><b class="mono" id="mkAnchored">…</b></div>
+          <div class="crow"><span>chain stores</span><b>hash and timestamp</b></div>
+          <div class="crow"><span>chain excludes</span><b>image and face signature</b></div>
+          <div class="crow"><span>proof format</span><b>versioned</b></div>
         </div>
         <div class="verdictbox" id="mkVerdict"></div>
       </div>
@@ -712,18 +673,18 @@
     <div class="claims">
       <div class="reveal" style="--d:0ms">
         <h3>Nothing personal is stored</h3>
-        <p>The contract holds a hash, an address, a timestamp and a schema number. Biometric
+        <p>The contract holds a hash, an address, a timestamp and a format version. Biometric
            data on an immutable public ledger is a permanent harm, so none is written.</p>
       </div>
       <div class="reveal" style="--d:90ms">
         <h3>Checking needs no wallet</h3>
-        <p>Re-verification is a read-only <code>eth_call</code>. A proof that required the
+        <p>Re-verification is a read-only blockchain lookup. A proof that required the
            claimant's private key would not be a proof.</p>
       </div>
       <div class="reveal" style="--d:180ms">
         <h3>A change is named, not just noticed</h3>
-        <p>A single hash would only tell you something moved. Per-field inclusion proofs tell
-           you it was <code>post.canonical_url</code>.</p>
+        <p>A single hash would only tell you something changed. The inclusion proof identifies
+           the exact detail, for example, the post address.</p>
       </div>
     </div>
   </div>
@@ -804,19 +765,6 @@ let RUN = null, UPLOAD = null, RUNNING = false;
 const PAGE_STEP = 12;
 let PAGE = PAGE_STEP;
 
-fetch("/api/benchmark").then(r=>r.json()).then(b=>{
-  if(!b || !b.roc_auc) return;
-  const cells=[["ROC-AUC", b.roc_auc.toFixed(3)],
-               ["EER", b.eer.toFixed(4)],
-               ["TAR at FMR 1e-3", b.tar_at_fmr_1e3.toFixed(3)],
-               ["false matches", `${b.false_matches} / ${b.test_negative}`],
-               ["detect p50", `${Math.round(b.detect_latency.p50_ms)} ms`],
-               ["embed p50", `${Math.round(b.embed_latency.p50_ms)} ms`]];
-  $("strip").innerHTML = cells.map(([k,v])=>
-    `<div><div class="v">${esc(v)}</div><div class="k">${esc(k)}</div></div>`).join("")
-    + `<div class="src">Measured by <code>sigil benchmark</code> on LFW, with thresholds
-       calibrated on a disjoint split. Not a marketing claim.</div>`;
-}).catch(()=>{});
 
 fetch("/api/config").then(r=>r.json()).then(c=>{
   const missing=[];
@@ -909,10 +857,10 @@ document.querySelectorAll(".reveal").forEach(el=>io.observe(el));
 
 const MK_LEAF = "SIGIL:LEAF:v1:", MK_NODE = "SIGIL:NODE:v1:";
 const MK_ORIGINAL = [
-  ["post.canonical_url", "https://youtube.com/watch?v=UMhVED7d-lQ"],
-  ["post.platform",      "youtube"],
-  ["decision.distance",  "0.2594"],
-  ["model",              "buffalo_l:scrfd+arcface"],
+  ["Post address",  "https://youtube.com/watch?v=UMhVED7d-lQ"],
+  ["Platform",      "YouTube"],
+  ["Match distance", "0.2594"],
+  ["Face model",     "ArcFace"],
 ];
 let mkFields = MK_ORIGINAL.map(row=>row.slice());
 let mkChanged = -1;
@@ -965,11 +913,10 @@ async function mkRender(){
   const box = $("mkVerdict");
   box.className = "verdictbox " + (intact ? "ok" : "bad");
   box.innerHTML = intact
-    ? `<b>Evidence intact</b>The root computed here equals the root on chain, so every
-       field is exactly what was anchored.`
-    : `<b>Tampered: ${esc(mkFields[mkChanged][0])}</b>The root no longer matches the
-       anchored one, and recomputing each leaf identifies which field moved. A single
-       hash of the whole document could not have told you that.`;
+    ? `<b>Evidence intact</b>The fingerprint computed here matches the saved reference,
+       so every detail is unchanged.`
+    : `<b>Changed: ${esc(mkFields[mkChanged][0])}</b>The fingerprint no longer matches the
+       saved reference, and checking each detail identifies exactly what changed.`;
 }
 
 $("mkTamper").onclick = ()=>{
@@ -1006,7 +953,6 @@ window.addEventListener("paste",ev=>{
    All three remain flags on `sigil run`, which is where a developer flag belongs. */
 const query=()=>new URLSearchParams({
   no_cache:"0", skip_chain:"0", largest:"1",
-  name: ($("nameHint")?.value || "").trim(),
 });
 
 async function submit(f){

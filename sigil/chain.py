@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -274,8 +275,14 @@ class ChainClient:
 
         if confirmations > 1:
             target = receipt["blockNumber"] + confirmations - 1
+            deadline = time.monotonic() + timeout
             while self._w3.eth.block_number < target:  # pragma: no cover - timing dependent
-                pass
+                if time.monotonic() >= deadline:
+                    raise ChainError(
+                        PipelineErrorCode.CHAIN_PENDING,
+                        f"transaction {tx_hex} has not reached {confirmations} confirmations",
+                    )
+                time.sleep(1)
 
         record = self.read(raw)
         if not record.exists:

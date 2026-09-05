@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import re
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -21,7 +21,7 @@ from typing import Any
 from sigil import __version__
 from sigil.candidates import fetch_all_sync
 from sigil.chain import ChainClient, ChainError
-from sigil.config import Settings, get_settings
+from sigil.config import DATA_DIR, ConfigurationError, Settings, get_settings
 from sigil.evidence.bundle import attach_receipt, build_manifest, write_bundle
 from sigil.evidence.canonical import canonicalize
 from sigil.face import FacePipelineError, detect_and_encode, get_engine
@@ -118,7 +118,7 @@ class RunResult:
 
 
 @contextmanager
-def _stage(result: RunResult, name: str, on_stage: Any = None) -> Iterator[None]:
+def _stage(result: RunResult, name: str, on_stage: Any = None) -> Generator[None, None, None]:
     if on_stage:
         on_stage(name)
     start = time.perf_counter()
@@ -251,7 +251,7 @@ def run_pipeline(
     output_root: Path | None = None,
     face_index: int | None = None,
     select_largest: bool = False,
-    max_candidates: int = 12,
+    max_candidates: int | None = None,
     match_threshold: float = DEFAULT_MATCH_THRESHOLD,
     reject_threshold: float = DEFAULT_REJECT_THRESHOLD,
     no_cache: bool = False,
@@ -260,16 +260,19 @@ def run_pipeline(
     name_hint: str = "",
     skip_chain: bool = False,
     expected_chain_id: int | None = None,
+    run_id: str | None = None,
+    started_at: datetime | None = None,
     on_stage: Any = None,
 ) -> RunResult:
     """Run the full pipeline. Never raises for expected failures, check ``result.ok``."""
 
     resolved = settings or get_settings()
-    started = datetime.now(UTC)
-    run_id = f"{started:%Y%m%dT%H%M%SZ}-{sha256_file(image_path)[:8]}"
+    started = started_at or datetime.now(UTC)
+    run_id = run_id or f"{started:%Y%m%dT%H%M%S%fZ}-{sha256_file(image_path)[:8]}"
+    max_candidates = max_candidates if max_candidates is not None else resolved.max_candidates
     result = RunResult(run_id=run_id, started_at=started)
 
-    base = Path(output_root) if output_root else Path("data/bundles")
+    base = Path(output_root) if output_root else DATA_DIR / "bundles"
     bundle_dir = base / run_id
     bundle_dir.mkdir(parents=True, exist_ok=True)
 
@@ -390,9 +393,7 @@ def run_pipeline(
 
     # -- 5. evidence -----------------------------------------------------------
     with _stage(result, "evidence", on_stage):
-        search_payload = canonicalize(
-            {k: str(v) for k, v in sorted(discovery["raw_responses"].items())}
-        )
+        search_payload = canonicalize(discovery["raw_responses"])
         configuration = {
             "match_threshold": match_threshold,
             "reject_threshold": reject_threshold,
@@ -504,7 +505,12 @@ def run_pipeline(
     except (ChainError, ValueError) as exc:
         # Discovery and evidence succeeded; only anchoring failed. The bundle is intact
         # and `sigil anchor --bundle` can complete it without repeating any search.
-        code = getattr(exc, "code", PipelineErrorCode.CHAIN_PENDING)
+        default_code = (
+            PipelineErrorCode.INVALID_CONFIGURATION
+            if isinstance(exc, ConfigurationError)
+            else PipelineErrorCode.CHAIN_PENDING
+        )
+        code = getattr(exc, "code", default_code)
         result.error_code = code
         result.error_message = f"{exc} (evidence bundle is intact at {bundle_dir})"
 

@@ -11,12 +11,13 @@ from __future__ import annotations
 import json
 import math
 import re
+from decimal import Decimal
 from typing import Any
 
-# JCS mandates the ECMAScript Number::toString algorithm. Python's repr() agrees with it
-# for every value that matters here (it is likewise shortest-round-trip), except that
-# Python writes exponents as 1e+21 where ECMAScript writes 1e+21 too but spells some
-# edge cases differently. We normalize the exponent form below.
+# JCS mandates the ECMAScript Number::toString algorithm. Python's repr() is also a
+# shortest-round-trip representation, but chooses scientific notation too early:
+# Python has ``1e-06`` where ECMAScript (and JCS) requires ``0.000001``. Normalize the
+# shared representation around that boundary below.
 _EXPONENT = re.compile(r"^(-?)(\d)(?:\.(\d+))?e([+-])(\d+)$")
 
 
@@ -36,6 +37,8 @@ def _format_number(value: float | int) -> str:
         return str(int(value))
 
     text = repr(float(value))
+    if 1e-6 <= abs(value) < 1e21 and "e" in text.lower():
+        return format(Decimal(text), "f")
     match = _EXPONENT.match(text)
     if match:
         sign, lead, rest, exp_sign, exp_digits = match.groups()

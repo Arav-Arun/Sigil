@@ -7,6 +7,7 @@ Everything here parses the URL and compares normalized hostnames.
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -101,13 +102,36 @@ def is_candidate_url(url: str) -> bool:
     URL filter's job is only to drop things that cannot be a page about a person.
     """
 
-    split = urlsplit(url.strip())
-    if split.scheme not in ("http", "https"):
+    if not is_public_http_url(url):
         return False
     hostname = normalized_hostname(url)
-    if not hostname or "." not in hostname:
-        return False
     return not any(hostname == host or hostname.endswith(f".{host}") for host in NON_PROFILE_HOSTS)
+
+
+def is_public_http_url(url: str) -> bool:
+    """Accept a normal public HTTP(S) URL, never an obvious local network target.
+
+    Search responses are untrusted input. Rejecting loopback, link-local and private
+    literal addresses keeps them from turning the media fetcher into a probe of the
+    machine or cloud metadata service. Hostname resolution is deliberately left to the
+    HTTP client because requiring DNS here would make offline parsing and mocked tests
+    brittle; redirects are checked again by the fetchers.
+    """
+
+    try:
+        split = urlsplit(url.strip())
+    except ValueError:
+        return False
+    if split.scheme.lower() not in {"http", "https"} or split.username or split.password:
+        return False
+    hostname = normalized_hostname(url)
+    if not hostname or hostname == "localhost" or hostname.endswith(".localhost"):
+        return False
+    try:
+        return ipaddress.ip_address(hostname).is_global
+    except ValueError:
+        # Domain names need a dot so bare local host aliases cannot pass.
+        return "." in hostname
 
 
 def extract_post_id(url: str) -> str:
@@ -175,6 +199,7 @@ __all__ = [
     "detect_platform",
     "extract_post_id",
     "is_candidate_url",
+    "is_public_http_url",
     "is_social_url",
     "normalized_hostname",
 ]

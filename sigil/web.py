@@ -21,18 +21,18 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import parse_qs, urlparse
 
 from sigil import __version__
-from sigil.config import Settings, get_settings
+from sigil.config import DATA_DIR, ROOT_DIR, SAMPLES_DIR, Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-BUNDLES_DIR = Path("data/bundles")
-UPLOAD_DIR = Path("data/outputs/uploads")
-SAMPLES_DIR = Path("data/samples")
+BUNDLES_DIR = DATA_DIR / "bundles"
+UPLOAD_DIR = DATA_DIR / "outputs" / "uploads"
+BENCHMARK_PATH = ROOT_DIR / "docs" / "benchmark.json"
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
 
@@ -126,8 +126,9 @@ def _start_run(
 
     from sigil.imaging import sha256_file
 
-    run_id = f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{sha256_file(image_path)[:8]}"
-    state = RunState(run_id=run_id)
+    started_at = datetime.now(UTC)
+    run_id = f"{started_at:%Y%m%dT%H%M%S%fZ}-{sha256_file(image_path)[:8]}"
+    state = RunState(run_id=run_id, started_at=started_at)
     with RUNS_LOCK:
         RUNS[run_id] = state
 
@@ -148,6 +149,8 @@ def _start_run(
                 use_cache=not no_cache,
                 skip_chain=skip_chain,
                 name_hint=name_hint,
+                run_id=run_id,
+                started_at=started_at,
                 on_stage=on_stage,
             )
             state.result = result.to_json()
@@ -209,6 +212,15 @@ class SigilHandler(BaseHTTPRequestHandler):
         # This server is localhost-only and never embedded; lock it down anyway.
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src https://fonts.gstatic.com; img-src 'self' data: https:; "
+            "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; "
+            "form-action 'self'",
+        )
         self.end_headers()
         self.wfile.write(body)
 
@@ -232,6 +244,36 @@ class SigilHandler(BaseHTTPRequestHandler):
         except ValueError:
             return None
         return candidate
+
+    def _same_origin_post(self) -> bool:
+        """Reject browser requests made by an unrelated web page.
+
+        The service binds to localhost, but a public page can still submit a form to a
+        localhost endpoint. That must not be enough to start a paid search or write a
+        chain transaction. Non-browser clients commonly omit both headers and remain
+        usable for local automation.
+        """
+
+        if self.headers.get("Sec-Fetch-Site", "").lower() == "cross-site":
+            return False
+        origin = self.headers.get("Origin")
+        if not origin:
+            return True
+        parsed = urlparse(origin)
+        if parsed.scheme not in {"http", "https"} or parsed.hostname not in {
+            "127.0.0.1",
+            "localhost",
+            "::1",
+            "0.0.0.0",
+        }:
+            return False
+        try:
+            origin_port = parsed.port or 80
+        except ValueError:
+            return False
+        server_addr = cast(tuple[Any, ...], self.server.server_address)
+        server_port = int(server_addr[1])
+        return origin_port == server_port
 
     # -- routes -------------------------------------------------------------------
 
@@ -272,9 +314,8 @@ class SigilHandler(BaseHTTPRequestHandler):
         if path == "/api/benchmark":
             # The landing strip shows measured numbers, read from the committed report
             # rather than typed into the page, so the two cannot drift apart.
-            report = Path("docs/benchmark.json")
-            if report.is_file():
-                self._file(report)
+            if BENCHMARK_PATH.is_file():
+                self._file(BENCHMARK_PATH)
             else:
                 self._json(200, {})
             return
@@ -302,6 +343,9 @@ class SigilHandler(BaseHTTPRequestHandler):
         self._json(404, {"error": "not found"})
 
     def do_POST(self) -> None:
+        if not self._same_origin_post():
+            self._json(403, {"error": "cross-origin requests are not allowed"})
+            return
         route = urlparse(self.path)
         if route.path == "/api/run-sample":
             self._run_sample(route)

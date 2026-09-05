@@ -31,7 +31,12 @@ from urllib.parse import urljoin, urlsplit
 import requests
 
 from sigil.models import SearchCandidate
-from sigil.search.normalize import canonicalize_url, detect_platform, is_social_url
+from sigil.search.normalize import (
+    canonicalize_url,
+    detect_platform,
+    is_public_http_url,
+    is_social_url,
+)
 from sigil.search.providers.base import ProviderResult
 
 logger = logging.getLogger(__name__)
@@ -71,7 +76,7 @@ def extract_image_urls(html: str, base_url: str, limit: int = MAX_IMAGES_PER_PAG
         absolute = urljoin(base_url, candidate)
         if absolute in seen or _SKIP_PATTERN.search(absolute):
             return
-        if urlsplit(absolute).scheme not in ("http", "https"):
+        if not is_public_http_url(absolute):
             return
         seen.add(absolute)
         found.append(absolute)
@@ -105,12 +110,30 @@ class PageHarvestProvider:
         return True  # no credential; it only reads pages another source already found
 
     def _fetch(self, url: str) -> str:
-        response = self._session.get(url, timeout=self._timeout, stream=True)
-        response.raise_for_status()
-        if "html" not in response.headers.get("content-type", "").lower():
-            return ""
-        body = response.raw.read(MAX_PAGE_BYTES, decode_content=True) or b""
-        return body.decode(response.encoding or "utf-8", "replace")
+        target = url
+        for _ in range(6):
+            if not is_public_http_url(target):
+                raise ValueError("refusing a non-public page URL")
+            response = self._session.get(
+                target, timeout=self._timeout, stream=True, allow_redirects=False
+            )
+            try:
+                if response.status_code in {301, 302, 303, 307, 308}:
+                    location = response.headers.get("location")
+                    if not location:
+                        raise ValueError("redirect response has no Location header")
+                    target = urljoin(response.url, location)
+                    continue
+                response.raise_for_status()
+                if "html" not in response.headers.get("content-type", "").lower():
+                    return ""
+                body = response.raw.read(MAX_PAGE_BYTES + 1, decode_content=True) or b""
+                if len(body) > MAX_PAGE_BYTES:
+                    raise ValueError(f"page exceeded the {MAX_PAGE_BYTES}-byte limit")
+                return body.decode(response.encoding or "utf-8", "replace")
+            finally:
+                response.close()
+        raise ValueError("too many redirects")
 
     def harvest(
         self,

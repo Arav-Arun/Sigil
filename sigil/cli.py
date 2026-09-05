@@ -259,20 +259,19 @@ PUBLIC_SEPOLIA_RPC = "https://ethereum-sepolia-rpc.publicnode.com"
 
 
 def _chain_target(bundle: Path, settings: Settings) -> tuple[str, str, str]:
-    """Decide which registry to read, preferring configuration over the bundle.
+    """Decide which registry to read, preferring configuration over checked-in metadata.
 
-    A bundle names the registry it claims to be anchored in. Using that is not trusting
-    it: the root either is or is not in the contract at that address, and a bundle that
-    points somewhere convenient still fails, because the contract is public and so is the
-    address it names. Falling back to it means a reviewer with an empty ``.env`` can still
-    run the on-chain half, which is the difference between a checkable claim and one that
-    requires our credentials to check.
+    The committed deployment is a reviewable trust anchor for this project. A bundle
+    receipt is only a fallback for an older checkout without deployment metadata, so a
+    tampered receipt cannot redirect an otherwise clean verifier to a different contract.
     """
 
     rpc_url = settings.sepolia_rpc_url.get_secret_value() or ""
     contract = settings.contract_address or ""
     if rpc_url and contract:
         return rpc_url, contract, ""
+
+    from sigil.chain import SEPOLIA_CHAIN_ID, load_deployment
 
     receipt_path = Path(bundle) / "receipt.json"
     receipt: dict[str, Any] = {}
@@ -283,6 +282,11 @@ def _chain_target(bundle: Path, settings: Settings) -> tuple[str, str, str]:
             receipt = {}
 
     notes: list[str] = []
+    if not contract:
+        deployment = load_deployment(SEPOLIA_CHAIN_ID) or {}
+        contract = str(deployment.get("address") or "")
+        if contract:
+            notes.append(f"using checked-in Sepolia registry {contract}")
     if not contract:
         contract = str(receipt.get("contract_address") or "")
         if contract:
@@ -300,8 +304,8 @@ def _chain_target(bundle: Path, settings: Settings) -> tuple[str, str, str]:
 
 
 def cmd_verify(args: argparse.Namespace, settings: Settings) -> int:
-    from sigil.chain import ChainClient, ChainError
-    from sigil.evidence.bundle import BundleError, verify_bundle
+    from sigil.chain import SEPOLIA_CHAIN_ID, ChainClient, ChainError
+    from sigil.evidence.bundle import BundleError, load_proofs, verify_bundle
 
     try:
         outcome = verify_bundle(args.bundle)
@@ -346,9 +350,10 @@ def cmd_verify(args: argparse.Namespace, settings: Settings) -> int:
             rpc_url, contract, provenance = _chain_target(args.bundle, settings)
             if not args.as_json and provenance:
                 console.print(f"[dim]{provenance}[/dim]")
-            client = ChainClient(rpc_url, contract, expected_chain_id=None)
+            client = ChainClient(rpc_url, contract, expected_chain_id=SEPOLIA_CHAIN_ID)
             record = client.read(outcome.root)
-            chain_ok = record.exists
+            expected_schema = int(load_proofs(args.bundle).get("schema_version", 1))
+            chain_ok = record.exists and record.schema_version == expected_schema
             payload["chain"] = {
                 "exists": record.exists,
                 "submitter": record.submitter,
@@ -358,6 +363,11 @@ def cmd_verify(args: argparse.Namespace, settings: Settings) -> int:
                 "contract": record.contract_address,
                 "explorer": record.explorer_url(),
             }
+            if record.exists and record.schema_version != expected_schema:
+                payload["chain"]["error"] = (
+                    f"schema version {record.schema_version} does not match bundle version "
+                    f"{expected_schema}"
+                )
             if not args.as_json:
                 if record.exists and local_ok:
                     console.print(
@@ -394,9 +404,13 @@ def cmd_verify(args: argparse.Namespace, settings: Settings) -> int:
                         )
                     )
         except (ChainError, ConfigurationError) as exc:
+            # An unavailable or misconfigured chain is not a successful verification.
+            # Keep the diagnostic distinct from a missing root, but return the same
+            # verification-failed exit code so automation cannot mistake it for PASS.
+            chain_ok = False
             payload["chain"] = {"error": str(exc)}
             if not args.as_json:
-                console.print(f"[yellow]on-chain check skipped:[/yellow] {exc}")
+                console.print(f"[red]on-chain check failed:[/red] {exc}")
 
     if args.as_json:
         print(json.dumps(payload, indent=2, default=str))
@@ -409,7 +423,7 @@ def cmd_verify(args: argparse.Namespace, settings: Settings) -> int:
 
 
 def cmd_anchor(args: argparse.Namespace, settings: Settings) -> int:
-    from sigil.chain import ChainClient, ChainError
+    from sigil.chain import SEPOLIA_CHAIN_ID, ChainClient, ChainError
     from sigil.evidence.bundle import BundleError, attach_receipt, load_proofs
 
     try:
@@ -424,7 +438,7 @@ def cmd_anchor(args: argparse.Namespace, settings: Settings) -> int:
         client = ChainClient(
             settings.sepolia_rpc_url.get_secret_value(),
             settings.contract_address,
-            expected_chain_id=None,
+            expected_chain_id=SEPOLIA_CHAIN_ID,
         )
         receipt = client.anchor(
             root, int(proofs.get("schema_version", 1)), settings.private_key.get_secret_value()

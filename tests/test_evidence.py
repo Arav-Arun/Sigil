@@ -23,6 +23,7 @@ from sigil.evidence.merkle import (
     locate_tampering,
     verify_proof,
 )
+from sigil.imaging import sha256_bytes
 
 
 class TestCanonical:
@@ -31,6 +32,9 @@ class TestCanonical:
 
     def test_matches_rfc8785_number_formatting(self):
         assert canonicalize([1.0, 0.5, -0.0, 100, 1e21]) == b"[1,0.5,0,100,1e+21]"
+
+    def test_uses_fixed_notation_at_the_jcs_lower_boundary(self):
+        assert canonicalize([1e-6, -2e-6, 1e-7]) == b"[0.000001,-0.000002,1e-7]"
 
     def test_nested_structures_round_trip(self):
         value = {"z": [1, {"y": None}], "a": {"b": True, "c": False}}
@@ -182,7 +186,7 @@ class TestBundle:
             input_sha256="ab" * 32,
             crop_sha256="cd" * 32,
             candidate_sha256="ef" * 32,
-            search_response_sha256="12" * 32,
+            search_response_sha256=sha256_bytes(canonicalize({})),
             canonical_post_url="https://x.com/a/status/1",
             platform="x",
             post_id="1",
@@ -244,11 +248,18 @@ class TestBundle:
         payload = b"y" * 4096
         import hashlib
 
-        manifest["digests"]["input"] = hashlib.sha256(payload).hexdigest()
+        digest = hashlib.sha256(payload).hexdigest()
+        manifest["digests"]["input"] = digest
+        manifest["digests"]["aligned_crop"] = digest
+        manifest["digests"]["candidate_media"] = digest
         path, _ = write_bundle(
             tmp_path / "bundle",
             manifest=manifest,
-            artifacts={"input.jpg": payload},
+            artifacts={
+                "input.jpg": payload,
+                "aligned_crop.jpg": payload,
+                "candidate.bin": payload,
+            },
             search_responses={},
             context={},
         )
@@ -258,6 +269,56 @@ class TestBundle:
         outcome = verify_bundle(path)
         assert not outcome.ok
         assert outcome.artifact_failures
+
+    def test_deleting_a_stored_artifact_is_detected(self, tmp_path, manifest):
+        payload = b"z" * 2048
+        import hashlib
+
+        digest = hashlib.sha256(payload).hexdigest()
+        manifest["digests"].update(
+            {"input": digest, "aligned_crop": digest, "candidate_media": digest}
+        )
+        path, _ = write_bundle(
+            tmp_path / "bundle",
+            manifest=manifest,
+            artifacts={
+                "input.jpg": payload,
+                "aligned_crop.jpg": payload,
+                "candidate.bin": payload,
+            },
+            search_responses={},
+            context={},
+        )
+        (path / "media" / "candidate.bin").unlink()
+
+        outcome = verify_bundle(path)
+        assert not outcome.ok
+        assert "candidate.bin (missing)" in outcome.artifact_failures
+
+    def test_editing_stored_search_response_is_detected(self, tmp_path, manifest):
+        response = {"R1:lens-exact-full": {"search_metadata": {"id": "abc"}}}
+        manifest["digests"]["search_response"] = sha256_bytes(canonicalize(response))
+        payload = b"x"
+        digest = sha256_bytes(payload)
+        manifest["digests"].update(
+            {"input": digest, "aligned_crop": digest, "candidate_media": digest}
+        )
+        path, _ = write_bundle(
+            tmp_path / "bundle",
+            manifest=manifest,
+            artifacts={
+                "input.jpg": payload,
+                "aligned_crop.jpg": payload,
+                "candidate.bin": payload,
+            },
+            search_responses=response,
+            context={},
+        )
+        (path / "search" / "responses.json").write_text('{"forged":true}', encoding="utf-8")
+
+        outcome = verify_bundle(path)
+        assert not outcome.ok
+        assert any("search responses" in item for item in outcome.artifact_failures)
 
     def test_missing_bundle_raises(self, tmp_path):
         with pytest.raises(BundleError):

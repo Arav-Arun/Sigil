@@ -17,6 +17,8 @@ from sigil.search.normalize import (
     canonicalize_url,
     detect_platform,
     extract_post_id,
+    is_candidate_url,
+    is_public_http_url,
     is_social_url,
     normalized_hostname,
 )
@@ -104,6 +106,27 @@ class TestCanonicalizeUrl:
     def test_rejects_a_non_http_scheme(self):
         with pytest.raises(ValueError):
             canonicalize_url("ftp://instagram.com/p/A")
+
+
+class TestPublicFetchUrls:
+    @pytest.mark.parametrize("url", ["https://example.com/a", "https://cdn.example.org/image.jpg"])
+    def test_accepts_public_domains(self, url):
+        assert is_public_http_url(url)
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://127.0.0.1/private",
+            "http://169.254.169.254/latest/meta-data",
+            "http://10.0.0.5/admin",
+            "http://[::1]/private",
+            "http://localhost:8420/",
+            "https://user:pass@example.com/",
+        ],
+    )
+    def test_rejects_private_or_credentialed_fetch_targets(self, url):
+        assert not is_public_http_url(url)
+        assert not is_candidate_url(url)
 
 
 class TestPostId:

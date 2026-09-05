@@ -56,16 +56,23 @@ def run_providers(
         return []
 
     results: list[ProviderResult] = []
-    with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
-        futures = {pool.submit(_timed, name, fn): name for name, fn in jobs}
-        try:
-            for future in as_completed(futures, timeout=timeout):
-                results.append(future.result())
-        except TimeoutError:
-            late = [name for future, name in futures.items() if not future.done()]
-            logger.warning("provider(s) %s exceeded %.0fs and were dropped", late, timeout)
-            for name in late:
-                results.append(ProviderResult(name=name, error=f"timed out after {timeout:.0f}s"))
+    pool = ThreadPoolExecutor(max_workers=len(jobs))
+    futures = {pool.submit(_timed, name, fn): name for name, fn in jobs}
+    try:
+        for future in as_completed(futures, timeout=timeout):
+            results.append(future.result())
+    except TimeoutError:
+        late = [name for future, name in futures.items() if not future.done()]
+        logger.warning("provider(s) %s exceeded %.2fs and were dropped", late, timeout)
+        for future, name in futures.items():
+            if not future.done():
+                future.cancel()
+                results.append(ProviderResult(name=name, error=f"timed out after {timeout:g}s"))
+    finally:
+        # A context manager calls shutdown(wait=True), which quietly defeats the timeout
+        # by waiting for every late thread before returning. Running calls cannot be killed,
+        # but they must not hold up the caller once their result has been discarded.
+        pool.shutdown(wait=False, cancel_futures=True)
     return results
 
 

@@ -17,17 +17,20 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
+import json
 import logging
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
+from urllib.parse import urljoin
 
 import httpx
 from PIL import Image
 
 from sigil.models import SearchCandidate
+from sigil.search.normalize import is_public_http_url
 
 logger = logging.getLogger(__name__)
 
@@ -103,20 +106,32 @@ def _is_image(content_type: str) -> bool:
 async def _get(
     client: httpx.AsyncClient, url: str, *, limit: int, accept: str
 ) -> tuple[httpx.Response, bytes]:
-    """Stream a response, aborting as soon as it exceeds the byte limit."""
+    """Fetch a bounded response, validating every redirect destination."""
 
-    chunks: list[bytes] = []
-    total = 0
-    async with client.stream("GET", url, headers={"Accept": accept}) as response:
-        declared = response.headers.get("content-length")
-        if declared and declared.isdigit() and int(declared) > limit:
-            raise ValueError(f"declared size {declared} exceeds the {limit}-byte limit")
-        async for chunk in response.aiter_bytes():
-            total += len(chunk)
-            if total > limit:
-                raise ValueError(f"response exceeded the {limit}-byte limit")
-            chunks.append(chunk)
-    return response, b"".join(chunks)
+    target = url
+    for _ in range(MAX_REDIRECTS + 1):
+        if not is_public_http_url(target):
+            raise ValueError("refusing a non-public fetch URL")
+        async with client.stream("GET", target, headers={"Accept": accept}) as response:
+            if response.status_code in {301, 302, 303, 307, 308}:
+                location = response.headers.get("location")
+                if not location:
+                    raise ValueError("redirect response has no Location header")
+                target = urljoin(str(response.url), location)
+                continue
+
+            declared = response.headers.get("content-length")
+            if declared and declared.isdigit() and int(declared) > limit:
+                raise ValueError(f"declared size {declared} exceeds the {limit}-byte limit")
+            chunks: list[bytes] = []
+            total = 0
+            async for chunk in response.aiter_bytes():
+                total += len(chunk)
+                if total > limit:
+                    raise ValueError(f"response exceeded the {limit}-byte limit")
+                chunks.append(chunk)
+        return response, b"".join(chunks)
+    raise ValueError(f"too many redirects (maximum {MAX_REDIRECTS})")
 
 
 async def _resolve_via_page(client: httpx.AsyncClient, post_url: str, platform: str) -> str | None:
@@ -125,12 +140,17 @@ async def _resolve_via_page(client: httpx.AsyncClient, post_url: str, platform: 
     endpoint = OEMBED_ENDPOINTS.get(platform)
     if endpoint:
         try:
-            response = await client.get(endpoint.format(url=post_url))
+            response, body = await _get(
+                client,
+                endpoint.format(url=post_url),
+                limit=128 * 1024,
+                accept="application/json",
+            )
             if response.status_code == 200:
-                thumbnail = response.json().get("thumbnail_url")
+                thumbnail = json.loads(body).get("thumbnail_url")
                 if isinstance(thumbnail, str) and thumbnail:
                     return thumbnail
-        except (httpx.HTTPError, ValueError) as exc:
+        except (httpx.HTTPError, ValueError, json.JSONDecodeError) as exc:
             logger.debug("oEmbed lookup failed for %s: %s", post_url, exc)
 
     try:
@@ -280,8 +300,7 @@ async def fetch_all(
     semaphore = asyncio.Semaphore(concurrency)
     limits = httpx.Limits(max_connections=concurrency, max_keepalive_connections=concurrency)
     async with httpx.AsyncClient(
-        follow_redirects=True,
-        max_redirects=MAX_REDIRECTS,
+        follow_redirects=False,
         timeout=httpx.Timeout(timeout, connect=min(timeout, 10.0)),
         limits=limits,
         headers={"User-Agent": BROWSER_UA},

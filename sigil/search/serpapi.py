@@ -339,7 +339,7 @@ def client_from_settings(
     return SerpApiClient(
         resolved.serpapi_key.get_secret_value(),
         timeout=resolved.http_timeout_seconds,
-        retries=resolved.http_retries + 1,
+        retries=resolved.http_retries,
         cache=SearchCache(enabled=use_cache),
         budget=SearchBudget(limit=budget_limit),
     )

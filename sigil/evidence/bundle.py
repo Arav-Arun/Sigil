@@ -27,7 +27,15 @@ from pathlib import Path
 from typing import Any
 
 from sigil.evidence.canonical import canonicalize
-from sigil.evidence.merkle import MerkleTree, TamperReport, build, locate_tampering
+from sigil.evidence.merkle import (
+    MerkleProof,
+    MerkleTree,
+    TamperReport,
+    build,
+    flatten,
+    locate_tampering,
+    verify_proof,
+)
 from sigil.imaging import sha256_bytes
 from sigil.models import SCHEMA_VERSION, ChainReceipt
 
@@ -150,6 +158,9 @@ def write_bundle(
         (path / SEARCH_DIR / f"{safe}.json").write_text(
             json.dumps(payload, indent=2, default=str), encoding="utf-8"
         )
+    # This canonical aggregate is the exact byte sequence whose digest is committed
+    # in the manifest. Per-route files remain for people inspecting the bundle.
+    (path / SEARCH_DIR / "responses.json").write_bytes(canonicalize(search_responses))
 
     # Context is explicitly outside the root: useful, but not part of the claim.
     (path / CONTEXT_NAME).write_text(
@@ -211,23 +222,98 @@ def verify_bundle(
     if not root:
         raise BundleError("no expected root available to verify against")
 
-    stored_leaves = {field: str(entry["leaf"]) for field, entry in proofs.get("proofs", {}).items()}
+    try:
+        proof_entries = proofs["proofs"]
+        if not isinstance(proof_entries, dict):
+            raise TypeError("proofs must be an object")
+        stored_leaves = {field: str(entry["leaf"]) for field, entry in proof_entries.items()}
+    except (KeyError, TypeError) as exc:
+        raise BundleError(f"malformed {PROOFS_NAME}: {exc}") from exc
     tamper = locate_tampering(manifest, root, stored_leaves)
 
     artifact_failures: list[str] = []
     if check_artifacts:
         digests = manifest.get("digests", {})
-        for name, expected in (
-            ("input.jpg", digests.get("input")),
-            ("aligned_crop.jpg", digests.get("aligned_crop")),
-            ("candidate.bin", digests.get("candidate_media")),
-        ):
-            artifact = path / MEDIA_DIR / name
-            if not expected or not artifact.is_file():
+        media_dir = path / MEDIA_DIR
+        # Compact, manifest-only examples intentionally omit the media directory. Once a
+        # bundle contains that directory, however, silently accepting a deleted file
+        # makes the completeness check meaningless.
+        if media_dir.is_dir():
+            for name, expected in (
+                ("input.jpg", digests.get("input")),
+                ("aligned_crop.jpg", digests.get("aligned_crop")),
+                ("candidate.bin", digests.get("candidate_media")),
+            ):
+                artifact = media_dir / name
+                if not expected:
+                    artifact_failures.append(f"{name} (digest missing from manifest)")
+                elif not artifact.is_file():
+                    artifact_failures.append(f"{name} (missing)")
+                else:
+                    actual = sha256_bytes(artifact.read_bytes())
+                    if actual != expected:
+                        artifact_failures.append(
+                            f"{name} (expected {expected[:12]}…, got {actual[:12]}…)"
+                        )
+
+        search_dir = path / SEARCH_DIR
+        if search_dir.is_dir():
+            expected_search = digests.get("search_response")
+            aggregate = search_dir / "responses.json"
+            try:
+                if aggregate.is_file():
+                    search_payload = json.loads(aggregate.read_text(encoding="utf-8"))
+                    actual_search = sha256_bytes(canonicalize(search_payload))
+                else:
+                    # Compatibility with bundles written before responses.json existed.
+                    context_path = path / CONTEXT_NAME
+                    context = (
+                        json.loads(context_path.read_text(encoding="utf-8"))
+                        if context_path.is_file()
+                        else {}
+                    )
+                    routes = context.get("routes_run", [])
+                    route_by_file = {
+                        route.replace(":", "_").replace("/", "_") + ".json": route
+                        for route in routes
+                    }
+                    legacy: dict[str, str] = {}
+                    for response_path in search_dir.glob("*.json"):
+                        route = route_by_file.get(response_path.name)
+                        if route:
+                            legacy[route] = str(
+                                json.loads(response_path.read_text(encoding="utf-8"))
+                            )
+                    actual_search = sha256_bytes(canonicalize(dict(sorted(legacy.items()))))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError) as exc:
+                artifact_failures.append(f"search responses (unreadable: {exc})")
+            else:
+                if not expected_search:
+                    artifact_failures.append("search responses (digest missing from manifest)")
+                elif actual_search != expected_search:
+                    artifact_failures.append(
+                        "search responses "
+                        f"(expected {expected_search[:12]}…, got {actual_search[:12]}…)"
+                    )
+
+        # A valid root is not enough if the stored per-field inclusion proofs were
+        # corrupted or replaced. Verify their coverage, identity and path to the root.
+        current_fields = flatten(manifest)
+        if set(proof_entries) != set(current_fields):
+            artifact_failures.append("merkle proofs (field coverage mismatch)")
+        if proofs.get("leaf_count") != len(current_fields):
+            artifact_failures.append("merkle proofs (leaf count mismatch)")
+        for field, value in current_fields.items():
+            entry = proof_entries.get(field)
+            if entry is None:
                 continue
-            actual = sha256_bytes(artifact.read_bytes())
-            if actual != expected:
-                artifact_failures.append(f"{name} (expected {expected[:12]}…, got {actual[:12]}…)")
+            try:
+                proof = MerkleProof.from_json(entry)
+                valid = proof.field == field and verify_proof(proof, value, root)
+            except (KeyError, TypeError, ValueError):
+                valid = False
+            if not valid:
+                artifact_failures.append(f"merkle proof ({field})")
 
     return VerificationOutcome(
         ok=tamper.ok and not artifact_failures,

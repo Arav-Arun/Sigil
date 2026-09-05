@@ -85,7 +85,10 @@ class TestDiscoveryToEvidence:
     """Face -> fetch -> verify -> evidence, with no credentials and no chain."""
 
     @pytest.fixture
-    def outcome(self, face_images, face_engine, media_server, tmp_path):
+    def outcome(self, face_images, face_engine, media_server, monkeypatch, tmp_path):
+        # The test deliberately hosts deterministic image fixtures on loopback. Production
+        # fetches reject local network targets to prevent search results probing a machine.
+        monkeypatch.setattr("sigil.candidates.is_public_http_url", lambda _url: True)
         observation = detect_and_encode(
             face_images["anchor"], tmp_path / "face", engine=face_engine, select_largest=True
         )
@@ -197,7 +200,11 @@ class TestDiscoveryToEvidence:
         path, tree = write_bundle(
             tmp_path / "bundle_c",
             manifest=manifest,
-            artifacts={"candidate.bin": selected.media.data},
+            artifacts={
+                "input.jpg": Path(observation.source_image).read_bytes(),
+                "aligned_crop.jpg": Path(observation.face_crop_path).read_bytes(),
+                "candidate.bin": selected.media.data,
+            },
             search_responses={},
             context={},
         )

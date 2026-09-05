@@ -82,6 +82,8 @@ class TestPersistence:
         path = tmp_path / "corpus.npz"
         index.save(path)
         assert index.stats.bytes_on_disk == path.stat().st_size > 0
+        loaded = FaceIndex.load(path)
+        assert loaded.stats.bytes_on_disk == path.stat().st_size > 0
 
 
 class TestEvaluation:

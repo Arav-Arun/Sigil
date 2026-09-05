@@ -110,6 +110,7 @@ def server(tmp_path, monkeypatch, jpeg_bytes):
     monkeypatch.setattr("sigil.web.SAMPLES_DIR", samples)
     monkeypatch.setattr("sigil.web.BUNDLES_DIR", tmp_path / "data" / "bundles")
     monkeypatch.setattr("sigil.web.UPLOAD_DIR", tmp_path / "data" / "outputs" / "uploads")
+    monkeypatch.setattr("sigil.web.BENCHMARK_PATH", tmp_path / "docs" / "benchmark.json")
 
     SigilHandler.settings = _settings()
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), SigilHandler)
@@ -182,6 +183,8 @@ class TestRoutes:
         with urllib.request.urlopen(f"{server}/api/config", timeout=10) as response:
             assert response.headers["X-Content-Type-Options"] == "nosniff"
             assert response.headers["Referrer-Policy"] == "no-referrer"
+            assert response.headers["X-Frame-Options"] == "DENY"
+            assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
 
     @pytest.mark.parametrize(
         "path",
@@ -208,6 +211,17 @@ class TestRoutes:
             raise AssertionError("expected 404")
         except urllib.error.HTTPError as exc:
             assert exc.code == 404
+
+    def test_cross_origin_page_cannot_start_a_run(self, server):
+        request = urllib.request.Request(
+            f"{server}/api/run-sample?file=public_figure.jpg",
+            method="POST",
+            headers={"Origin": "https://attacker.example", "Sec-Fetch-Site": "cross-site"},
+        )
+        with pytest.raises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(request, timeout=10)
+        assert caught.value.code == 403
+        assert json.loads(caught.value.read())["error"] == "cross-origin requests are not allowed"
 
     def test_run_sample_refuses_a_path_outside_the_samples_directory(self, server, tmp_path):
         (tmp_path / "secret.jpg").write_bytes(b"not a sample")
