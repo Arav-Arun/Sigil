@@ -58,5 +58,7 @@ On the architecture diagram, change **“above match threshold”** to **“cosi
 > Sigil now rebuilds the root from the saved evidence and checks the same root against the smart contract. Etherscan proves that the transaction exists, while these two green checks prove that our current evidence matches it. This read-only verification needs no wallet or private key.
 >
 > That completes the full pipeline: face identification, real web and social discovery, blockchain anchoring, and independent tamper verification.
+>
+> With Sigil, every verified face match becomes a transparent, tamper-evident record that anyone can independently verify.
 
 **Finish on the two successful verification checks.**
