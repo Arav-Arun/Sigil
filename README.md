@@ -58,12 +58,10 @@ $ sigil verify --bundle data/bundles/20260902T144231Z-a3f9c1d2
 
 Three more properties the design insists on:
 
-- **Verification needs no private key.** Re-verifying is a read-only `eth_call`. A proof
-  that required the claimant's key would not be a proof.
-- **Uncertainty is never converted into a result.** Identity is `MATCH`, `NON_MATCH`, or
-  `INCONCLUSIVE`. A high search rank cannot promote a candidate that failed the face
-  gate, and an outage (`SEARCH_UNAVAILABLE`) is never reported as "nothing found"
-  (`SEARCH_EMPTY`).
+- **Verification needs no private key.** Re-verifying is a read-only `eth_call`.
+- **Uncertainty is never converted into a result.** Identity is `MATCH`, `NON_MATCH` or
+  `INCONCLUSIVE`, search rank cannot promote a candidate that failed the face gate, and an
+  outage (`SEARCH_UNAVAILABLE`) is never reported as "nothing found" (`SEARCH_EMPTY`).
 - **Every accuracy claim below is measured**, by a script in this repo, with denominators.
 
 | | |
@@ -94,16 +92,11 @@ Apple M4, 32 GB, Python 3.12.13. Reproduce with `sigil benchmark`.
 | Engine agreement | bit-exact with the InsightFace reference (cos **1.000000**) |
 | CoreML vs CPU | numerically identical (max Δ **2.4e-07**) |
 
-**The shipped operating point is deliberately tighter than this table.** The numbers above
-answer "what does LFW allow", and LFW's impostors are *random pairs of different people*.
-This pipeline never sees those. A reverse-image search returns candidates precisely because
-they resemble the query, so every negative it must survive is drawn from the hard tail of
-that distribution.
-
-Measured on the held-out split: genuine pairs reach p95 **0.4867**, and the single closest
-impostor sits at **0.7924**. Calibrating at FMR 1e-3 lands on 0.795, which puts the boundary
-*on the impostor edge* with no margin, and a real run then matched a stranger at **0.6888**.
-So the shipped threshold is **0.55**, just above the genuine 97th percentile:
+**The shipped operating point is deliberately tighter than this table.** LFW's impostors
+are random pairs of different people, and this pipeline never sees those: a reverse-image
+search returns candidates *because* they resemble the query. Calibrating at FMR 1e-3 lands
+on 0.795, which sits on the impostor edge with no margin, and a real run then matched a
+stranger at **0.6888**.
 
 | | Calibrated (LFW) | Shipped |
 |---|---|---|
@@ -112,39 +105,21 @@ So the shipped threshold is **0.55**, just above the genuine 97th percentile:
 | Genuine pairs kept | 98.6% | **97.2%** |
 | Margin to nearest impostor | 0.00 | **0.24** |
 
-It costs about 1.4 points of recall, and the 0.55-0.75 band where the two distributions
-genuinely overlap now reports `INCONCLUSIVE` rather than a confident wrong name. Trading
-recall to avoid naming the wrong person is the entire reason the gate has three states.
+That costs about 1.4 points of recall, and the 0.55 to 0.75 band where the distributions
+genuinely overlap now reports `INCONCLUSIVE` rather than a confident wrong name.
 
-### Resolution: a hypothesis that did not survive measurement
+### A hypothesis that did not survive measurement
 
-The one production false match on record, a stranger at **0.6888**, was on a 112px
-thumbnail, which suggested small faces should face a tighter threshold. `sigil benchmark`
-tests that by downscaling LFW and re-detecting, which is what a search thumbnail actually
-is:
+That 0.6888 match was on a 112px thumbnail, which suggested small faces need a tighter
+threshold. The resolution sweep in `sigil benchmark` says otherwise: **impostors do not
+get closer as the face shrinks** (0.839 at 98px, 0.862 at 29px). What degrades is the
+genuine side, so low resolution costs recall rather than precision. The shipped size
+penalty is therefore zero and a test pins it there.
 
-| face px | genuine p97 | impostor min |
-|---:|---:|---:|
-| 29 | 0.5220 | 0.8620 |
-| 39 | 0.4923 | 0.8495 |
-| 54 | 0.4695 | 0.8448 |
-| 73 | 0.4699 | 0.8367 |
-| 98 | 0.4669 | 0.8387 |
-
-**Impostors do not get closer as the face shrinks.** What degrades is the genuine side,
-p97 climbing 0.467 to 0.522, so low resolution costs *recall*, not precision. A size
-penalty would tighten a bar that is not the problem, so the shipped penalty is zero and a
-test pins it there. Stated plainly: LFW impostors are random strangers, and a reverse
-image search returns look-alikes on purpose, so this rules out the simple explanation for
-that 0.6888 match and not the hard-negative one. What the sweep does justify is the 48px
-minimum face size, below which the genuine distribution starts colliding with 0.55.
-
-The same run calibrates the repost test, which previously used two invented constants.
-A photo re-encoded the way a search index does reaches p99 mean error **5.61** and dhash
-**0.0586**; the closest genuinely *different* photograph sits at **24.0** and **0.238**.
-The shipped dhash bound was 0.04, *below* the same-photo 99th percentile, so it was
-quietly showing genuine reposts as independent discoveries. It is now 0.07, with over 3x
-separation on both signals.
+The same run calibrates the repost test, and found the shipped dhash bound of 0.04 sat
+*below* the same-photo 99th percentile of 0.0586, so genuine reposts were being shown as
+independent discoveries. It is now 0.07. Tables in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 **Coverage is reported on purpose.** A detection failure is not a neutral event, the pair
 silently leaves the evaluation, so a pipeline that detects *less* scores *better* on a
@@ -210,20 +185,12 @@ sigil verify --bundle   (fresh process, no private key, names the broken leaf on
 
 ### Why not DeepFace
 
-The project began on DeepFace. It does not import in this environment at all, `retinaface` calls `validate_for_keras3()` and raises against TensorFlow 2.21. Rather
-than pin `tf-keras` and inherit the rest, Sigil runs the ONNX weights DeepFace wraps:
-
-| | DeepFace | Sigil |
-|---|---|---|
-| Status | does not import | works |
-| Install | ~600 MB (TensorFlow) | ~90 MB |
-| Per-call cost | model reload | sessions warmed once |
-| Alignment | library-internal | explicit, in this repo, unit-tested |
-| Embedding latency | not measurable, it does not run | 9.7 ms on CoreML, 3.5x faster than CPU |
-
-The SCRFD anchor decoding and NMS are implemented in
-[`sigil/face/engine.py`](sigil/face/engine.py) and validated bit-exact against the
-InsightFace reference.
+The project began on DeepFace. It does not import in this environment at all: `retinaface`
+calls `validate_for_keras3()`, which raises against TensorFlow 2.21. Rather than pin
+`tf-keras` and inherit ~600 MB of TensorFlow and a model reload on every call, Sigil runs
+the ONNX weights DeepFace wraps, in ~90 MB with sessions warmed once. The SCRFD anchor
+decoding and NMS are implemented in [`sigil/face/engine.py`](sigil/face/engine.py) and
+validated bit-exact against the InsightFace reference.
 
 ---
 
@@ -235,32 +202,14 @@ Requires **Python 3.12** and **Node 22**.
 git clone https://github.com/Arav-Arun/HHgoa-FaceID.git && cd HHgoa-FaceID
 uv sync --all-extras --group dev
 npm ci
-cp .env.example .env
+cp .env.example .env          # then fill in SERPAPI_KEY and, to anchor, PRIVATE_KEY
+npm run compile && npm run deploy:sepolia    # only if deploying your own registry
+sigil preflight --live        # checks credentials, quota, wallet and the contract
 ```
 
-Fill in `.env`:
-
-```bash
-SERPAPI_KEY=...                                          # serpapi.com, free tier is 100 searches/month
-SEPOLIA_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com   # public, no key needed
-PRIVATE_KEY=...                                          # a THROWAWAY wallet, faucet-funded only
-CONTRACT_ADDRESS=...                                     # set after deploying
-```
-
-Deploy the contract:
-
-```bash
-npm run compile && npm run deploy:sepolia
-```
-
-Check everything before a demo:
-
-```bash
-sigil preflight --live
-```
-
-`--live` also queries remaining SerpApi quota and the wallet balance. Without it,
-preflight makes no network calls.
+`SEPOLIA_RPC_URL` can stay on the public endpoint in `.env.example`; no key is needed to
+read. `PRIVATE_KEY` must be a throwaway, faucet-funded wallet, and is needed only to
+anchor. Verification never uses it.
 
 ---
 
@@ -300,25 +249,6 @@ evidence format a format rather than one library's output.
 | ![Local verification listing every check that passed](docs/images/verify-local.jpg) | ![The on-chain record, with the registry identity confirmed](docs/images/verify-chain.jpg) |
 | **Rebuilt from the files, not trusted.** The root is recomputed from the manifest, every inclusion proof is checked, and every stored artifact is re-hashed. | **Read from the public chain.** No wallet and no account. The deployed bytecode is hashed first, so a look-alike contract cannot answer for the registry. |
 
-### Deploying
-
-Both pages are plain static HTML with no build step, so they publish anywhere.
-[`vercel.json`](vercel.json) copies them into `public/` and serves the landing page at
-`/` and the verifier at `/verify`:
-
-```bash
-vercel deploy
-```
-
-**What works on the hosted copy:** the whole explainer, the live fingerprint demo, and
-the entire Verify Evidence page, including the on-chain read and the registry bytecode
-check. None of that needs a server.
-
-**What does not:** running a face search. That needs the local Python pipeline and about
-190 MB of model weights, and `serve` binds to localhost on purpose, so it is not hosted.
-The hosted landing page detects that there is no pipeline behind it and says so on the
-upload panel instead of accepting a photo and failing.
-
 ### Command line
 
 ```bash
@@ -357,40 +287,33 @@ Exit codes are stable, because a failure must never render as a success:
 
 ### What reverse-image search can and cannot do
 
-Worth stating plainly, because it sets the ceiling on every recall number below.
-
 **Google Lens does not do face recognition.** It is suppressed deliberately, for privacy.
 Handed a portrait of someone in distinctive glasses it returned sixty results, almost all
-eyewear retailers;
-handed a tight face crop it returned strangers who look similar. It finds *this person*
-when the photo, or the person, is already indexed and captioned somewhere Google crawls.
+eyewear retailers. It finds *this person* only when the photo, or the person, is already
+indexed and captioned somewhere Google crawls.
 
 That is why discovery fans out rather than wrapping one endpoint, and why a face with no
-public photo presence returns `SEARCH_EMPTY` or a set of candidates that are all correctly
-rejected. Neither is a bug, and neither is dressed up as a match. A dedicated face-search
-index (the commercial people-search engines run their own) would raise recall on private
-individuals, which is exactly the capability this project's responsible-use section
+public photo presence returns `SEARCH_EMPTY` or candidates that are all correctly
+rejected. Neither is dressed up as a match. A dedicated face-search index would raise
+recall on private individuals, which is the capability the responsible-use section
 declines to build.
 
 ## Surviving the SerpApi free tier
 
-100 searches/month, and a naive run spends four. Five mechanisms keep that workable:
+100 searches a month, and a naive run spends four. What keeps that workable:
 
-1. **Content-addressed cache** keyed by image digest + route + params. Repeat runs cost
-   nothing. `--no-cache` forces live for the recorded demo.
-2. **`type=all` instead of two narrower calls.** One request returns visual matches, the
-   pages that discuss the image, and the inferred entity. It halved the common path from
-   two searches to one, and from 12.9s to 6.1s.
-3. **Progressive escalation.** Wave two only runs when wave one is thin, so a typical
-   successful run spends one search.
-4. **Sources that cost nothing.** Wikidata needs no account and no quota, so it keeps
-   contributing after SerpApi is exhausted.
-5. **One upload per run.** The `image_id` is reused across every Lens route within its
-   10-minute lifetime.
-6. **Hard per-run budget** (`--search-budget`) that raises rather than overspending, plus
-   a **reserve floor** live runs refuse to dip below, so the last searches of the month
-   cannot be spent on a debugging loop.
-7. **Fixture-driven tests.** The whole suite runs with zero API calls.
+- **Content-addressed cache** keyed by image digest, route and params, so repeat runs
+  cost nothing. `--no-cache` forces live for a recorded demo.
+- **`type=all` instead of two narrower calls**, which returns visual matches, the pages
+  discussing the image, and the inferred entity in one request. Halved the common path
+  from two searches to one, and 12.9s to 6.1s.
+- **Progressive escalation**, so wave two runs only when wave one is thin. A typical
+  successful run spends one search.
+- **Sources that cost nothing.** Wikidata needs no account, so it keeps contributing
+  after SerpApi is exhausted.
+- **A hard per-run budget** (`--search-budget`) that raises rather than overspending,
+  plus a reserve floor live runs refuse to dip below.
+- **Fixture-driven tests**, so the suite runs with zero API calls.
 
 ---
 
@@ -411,78 +334,40 @@ declines to build.
 | ![The Merkle fingerprint built live in the browser](docs/images/merkle-demo.jpg) | ![The chain record: contract, transaction, block, submitter, gas](docs/images/report-chain.jpg) |
 | **Change one character, watch the fingerprint move.** The hashing runs in the browser with the same construction the pipeline uses. | **What actually lands on chain.** A 32-byte root, the submitter, a timestamp and a schema version. No photo, no name, no face data. |
 
-Sourcify reports an **exact match** on both the creation and runtime bytecode, which is
-the strong form: the contract at that address is byte-identical to what
-[`contracts/SigilRegistry.sol`](contracts/SigilRegistry.sol) in this repository compiles
-to, metadata included. A *partial* match would mean only the executable code agreed.
+**Nothing personal is written on-chain.** No images, no embeddings, no names, no post
+text, only a hash. Biometric data must not go on an immutable public ledger.
 
-That distinction is not academic here. An earlier deployment fell to partial after a
-one-line edit to a **comment** in the contract: solc hashes the source into the metadata
-blob it appends to the runtime code, so the repository silently stopped reproducing the
-deployed bytecode while every file still claimed otherwise. Nothing misbehaved. It just
-quietly stopped being verifiable. `sigil preflight --live` now compares the deployed code
-against the compiled artifact and reports which of the three cases holds:
-
-```console
-$ sigil preflight --live
-│ chain    │ PASS │ chain 11155111, contract 0xc92D2fDe…95517, 3 root(s) anchored │
-│ bytecode │ PASS │ deployed code matches contracts/SigilRegistry.sol exactly     │
-```
-
-[`deployments/sepolia.json`](deployments/sepolia.json) is written by the deploy script,
-not by hand, and records the source commit, compiler settings, and the SHA-256 of the
-runtime bytecode that was actually deployed. The deploy aborts if the code that lands
-on chain is not the code this tree compiles.
-
-**No personal data is ever written on-chain.** No images, no embeddings, no names, no post
-text, only a hash. That is a privacy requirement, not an optimisation: biometric data
-must not be written to an immutable public ledger.
-
-The contract rejects the zero root, rejects duplicate roots (a re-anchor cannot overwrite
-the original submitter or timestamp), and `get()` reverts on an unknown root so a
-zero-struct read can never be mistaken for success.
+The contract rejects the zero root and rejects duplicate roots, so a re-anchor cannot
+overwrite the original submitter or timestamp.
 
 **Verification checks which contract answered.** A `true` from `verify(root)` only proves
 that *some* contract said yes, and the address can come from the bundle's own
-`receipt.json`, so a forged bundle could point a verifier at a look-alike with the same
-ABI that returns `true` for everything. Both verifiers therefore hash the deployed runtime
-bytecode and compare it against `deployments/sepolia.json` before reading:
+`receipt.json`. Both verifiers hash the deployed bytecode and compare it against
+`deployments/sepolia.json` before reading, so a look-alike with the same ABI is rejected
+with exit `3`. Sourcify reports an **exact match**, meaning the deployed contract is
+byte-identical to what this repository compiles.
 
-```console
-$ sigil verify --bundle docs/example-bundle
-  ✓ registry: runtime bytecode matches the recorded registry (c5708dce1ff2…)
+**A confirmation timeout is resumable, not repeatable.** A transaction that reaches the
+chain but does not confirm has its hash written to `pending.json`, and
+`sigil anchor --bundle <dir>` waits for that transaction rather than signing a second one.
 
-$ CONTRACT_ADDRESS=<a different real Sepolia contract> sigil verify --bundle docs/example-bundle
-on-chain check failed: the contract at 0xfFf9…6B14 is not SigilRegistry:
-runtime bytecode digest 9bbda01ae25d… does not match the recorded c5708dce1ff2…   # exit 3
-```
-
-**A confirmation timeout is resumable, not repeatable.** When a transaction reaches the
-chain but does not confirm in time, its hash is written to `pending.json` in the bundle
-and `sigil anchor --bundle <dir>` waits for *that* transaction. It never signs a second
-one, so a slow network cannot cost two anchors and two fees for one root. Resuming needs
-no private key.
+Full detail, including why the registry identity check exists, is in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ---
 
 ## Testing
 
 ```bash
-uv run --group dev pytest -q                # 295 Python tests
+uv run --group dev pytest -q                # 296 Python tests
 npm test                                    # 9 Solidity tests
 uv run --group dev ruff check . && uv run --group dev mypy sigil
 ```
 
-The end-to-end test in [`tests/test_e2e.py`](tests/test_e2e.py) runs the real
-face engine, a real HTTP fetch, real Merkle construction, and a real EVM transaction
-against a local Hardhat node, with no credentials. Start a node first:
-
-```bash
-npx hardhat node
-```
-
-Live SerpApi tests are opt-in behind `RUN_LIVE_TESTS=1` so CI consumes neither quota nor
-test ETH.
+[`tests/test_e2e.py`](tests/test_e2e.py) runs the real face engine, a real HTTP fetch,
+real Merkle construction and a real EVM transaction against a local Hardhat node
+(`npx hardhat node`), with no credentials. Live SerpApi tests are opt-in behind
+`RUN_LIVE_TESTS=1`, so CI consumes neither quota nor test ETH.
 
 ---
 
