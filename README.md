@@ -44,7 +44,7 @@ and [`docs/DEMO.md`](docs/DEMO.md) is the runbook for the recording.
 
 ## What makes this different
 
-Most pipelines of this shape can only tell you *that* something changed. Sigil tells you
+Most pipelines of this shape can only tell you *that* something changed. Sigil names
 **which field** changed, offline, from the bundle alone:
 
 ```console
@@ -114,74 +114,64 @@ That 0.6888 match was on a 112px thumbnail, which suggested small faces need a t
 threshold. The resolution sweep in `sigil benchmark` says otherwise: **impostors do not
 get closer as the face shrinks** (0.839 at 98px, 0.862 at 29px). What degrades is the
 genuine side, so low resolution costs recall rather than precision. The shipped size
-penalty is therefore zero and a test pins it there.
+penalty is therefore zero, and a test pins it there.
 
-The same run calibrates the repost test, and found the shipped dhash bound of 0.04 sat
-*below* the same-photo 99th percentile of 0.0586, so genuine reposts were being shown as
-independent discoveries. It is now 0.07. Tables in
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+The same run found the shipped dhash bound for repost detection, 0.04, sat *below* the
+same-photo 99th percentile of 0.0586, so genuine reposts were being shown as independent
+discoveries. It is now 0.07.
 
-**Coverage is reported on purpose.** A detection failure is not a neutral event, the pair
-silently leaves the evaluation, so a pipeline that detects *less* scores *better* on a
-coverage-blind metric. Every figure above is conditional on the 99.7% of pairs where a
-face was found.
+Three caveats, stated plainly:
 
-**On the 1 false match.** With ~499 impostor pairs the smallest observable non-zero
-rate is 1/499 ≈ 2e-3, so a held-out split cannot resolve an FMR of 1e-3 at all. The
-operating point is chosen on the ~4,000 calibration negatives, where it can be. The test
-suite enforces a 1e-2 ceiling on the held-out rate rather than asserting zero, because
-asserting zero would be asserting luck.
+- **Coverage matters.** A detection failure removes the pair from the evaluation, so a
+  pipeline that detects *less* scores *better* on a coverage-blind metric. Every figure
+  above is conditional on the 99.7% of pairs where a face was found.
+- **1 false match in 499 does not measure FMR 1e-3.** The smallest observable non-zero
+  rate is 2e-3. The operating point is chosen on the ~4,000 calibration negatives, and
+  the suite enforces a 1e-2 ceiling rather than asserting zero, which would be asserting
+  luck.
+- **LFW is easier than the open web.** Frontal, well-lit celebrity photos. Compressed
+  thumbnails, group shots and extreme pose are harder, and real accuracy will be lower.
 
-Thresholds are calibrated on the LFW **train + 10-fold** splits and reported on the
-**disjoint test** split. Tuning and reporting on the same pairs is the most common way a
-face-recognition benchmark misleads, so it is avoided here. Full report:
+Thresholds are calibrated on the LFW train and 10-fold splits and reported on the
+disjoint test split. Full tables in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and
 [`docs/benchmark.json`](docs/benchmark.json).
-
-> **Caveat, stated plainly.** LFW is a frontal, well-lit celebrity benchmark. Social-media
-> media, compressed thumbnails, group shots, extreme pose, is harder, and real-world
-> accuracy will be lower than the table above. The uncertainty band exists for exactly
-> that reason.
 
 ---
 
 ## Architecture
 
+```mermaid
+flowchart TD
+    IN["Input image<br/>magic bytes, MIME, EXIF, sRGB, bomb caps, sha256"]
+    DET["SCRFD det_10g detects every face<br/>quality gate: size, sharpness, exposure, pose"]
+    EMB["Umeyama alignment to 112x112, then ArcFace<br/>512-d embedding, held in memory, never on chain"]
+
+    S1["Google Lens<br/>full image"]
+    S2["Google Lens<br/>portrait and<br/>face crops"]
+    S3["Name pivot<br/>social domains"]
+    S4["Exa and<br/>Wikidata"]
+
+    FETCH["Fetch every candidate, sha256 before decode<br/>quality ladder: original, OpenGraph, oEmbed, thumbnail"]
+    GATE{"Face gate: every face in the<br/>candidate vs the source"}
+    MATCH["MATCH"]
+    UNSURE["INCONCLUSIVE"]
+    REJECT["NON_MATCH"]
+    EVID["RFC 8785 canonical manifest, the whole verified set<br/>domain-separated Merkle leaves, 32-byte root"]
+    CHAIN["SigilRegistry.anchor on Sepolia<br/>root, submitter, timestamp, schema version"]
+    VERIFY["sigil verify --bundle<br/>fresh process, no private key<br/>names the changed field on failure"]
+
+    IN --> DET --> EMB
+    EMB --> S1 & S2 & S3 & S4 --> FETCH --> GATE
+    GATE -->|"at or below threshold"| MATCH
+    GATE -->|"uncertainty band"| UNSURE
+    GATE -->|"at or above reject"| REJECT
+    MATCH --> EVID --> CHAIN --> VERIFY
 ```
-input image
-  │  magic bytes · MIME · EXIF transpose · sRGB · decompression-bomb caps · sha256
-  ▼
-SCRFD det_10g ──▶ every face: bbox + score + 5 landmarks
-  │  select: single | --face-index N | --largest   (multi-face never silently guesses)
-  │  quality gate: size · Laplacian sharpness · exposure · roll/yaw · truncation
-  ▼
-Umeyama similarity alignment → canonical 112×112 → ArcFace → L2-normalized 512-d
-  │  (the embedding is biometric data: kept in memory, never logged, never on-chain)
-  ▼
-┌─── GENUINE SEARCH: bounded fan-out across independent sources ───────────────┐
-│ Lens type=all on the full image → visual matches + inferred entities          │
-│ Lens type=all on portrait and aligned face crops (concurrent)                 │
-│ inferred-name web pivot restricted to supported social domains                │
-│ Exa neural pages (optional) + Wikidata/Commons portrait (no credential)       │
-│                                                                              │
-│ the per-run budget limits paid calls; failures and timeouts are recorded      │
-│ without hiding a genuine empty result. The top two non-social pages are       │
-│ harvested for additional photos, then every candidate is face-checked.       │
-└───────────────────────────────────────────────────────────────────────────────┘
-  │  URL canonicalization · dedupe · social ranked first (never filtered first)
-  ▼
-bounded-concurrency fetch · redirect/size/content-type caps · sha256 BEFORE decode
-  │  ladder: original → OpenGraph → oEmbed → thumbnail, each labelled by quality
-  ▼
-detect ALL faces per candidate → batch embed → cosine vs source → best-face-wins
-  │  MATCH / NON_MATCH / INCONCLUSIVE, ranked by margin alone
-  ▼
-RFC 8785 canonical JSON manifest, incl. the whole verified set → Merkle leaves → root
-  │  H("SIGIL:LEAF:v1:" ‖ field ‖ canonical_value)
-  ▼
-SigilRegistry.anchor(root, schemaVersion) on Sepolia → receipt → Etherscan
-  ▼
-sigil verify --bundle   (fresh process, no private key, names the broken leaf on failure)
-```
+
+Search decides only what gets looked at. The face gate decides identity, and ranking among
+verified matches is the distance margin alone. Discovery and evidence complete before the
+chain is touched, so a chain outage costs the anchoring step and nothing else.
+
 
 ### Why not DeepFace
 
@@ -221,14 +211,12 @@ anchor. Verification never uses it.
 sigil serve          # opens http://127.0.0.1:8420
 ```
 
-Drop, paste, or pick an image. Every candidate the pipeline examined appears with its
-cosine distance, the reason it passed or failed, which of the four search routes surfaced
-it, and where the media came from. The sidebar carries the evidence root and a search
-audit panel listing each provider call with its real search ID.
+Drop, paste or pick an image. Every candidate appears with its cosine distance, the
+reason it passed or failed, the routes that surfaced it, and where the media came from.
 
-**Localhost only, by design.** `serve` refuses any other bind address with an error.
-Publishing a face-search interface would let anyone submit anyone's face, which is exactly
-the use the responsible-use section rules out.
+**Localhost only, by design.** `serve` refuses any other bind address. Publishing a
+face-search interface would let anyone submit anyone's face, which is the use the
+responsible-use section rules out.
 
 | | |
 |:--|:--|
@@ -238,11 +226,11 @@ the use the responsible-use section rules out.
 ### Independent verifier
 
 [`sigil/static/verify.html`](sigil/static/verify.html) opens straight from the filesystem,
-no server, no install, and is also served at `/verify`. It re-implements
-the RFC 8785 canonicalization and the Merkle construction in JavaScript and rebuilds the
-root from scratch rather than trusting the Python that produced it, then reads the anchor
-with a plain `eth_call`. Two independent implementations agreeing is what makes the
-evidence format a format rather than one library's output.
+no server and no install, and is also served at `/verify`. It re-implements the RFC 8785
+canonicalization and the Merkle construction in JavaScript, rebuilding the root rather
+than trusting the Python that produced it, then reads the anchor with a plain `eth_call`.
+Two independent implementations agreeing is what makes this a format rather than one
+library's output.
 
 | | |
 |:--|:--|
@@ -252,26 +240,16 @@ evidence format a format rather than one library's output.
 ### Command line
 
 ```bash
-# Full pipeline: search, verify, anchor
-sigil run --image data/samples/subject.jpg
+sigil run --image face.jpg                 # search, verify, anchor
+sigil run --image face.jpg --no-cache      # force a live search, spends quota
+sigil run --image face.jpg --skip-chain    # build evidence without anchoring
 
-# Force a genuinely live search (spends quota, use this for the recording)
-sigil run --image data/samples/subject.jpg --no-cache
+sigil verify --bundle <dir>                # verify, no private key needed
+sigil verify --bundle <dir> --local-only   # verify offline, no RPC
+sigil anchor --bundle <dir>                # anchor a bundle built earlier
 
-# Build evidence without touching the chain
-sigil run --image data/samples/subject.jpg --skip-chain
-
-# Independently verify a bundle, no private key required
-sigil verify --bundle data/bundles/<run-id>
-
-# Verify offline, without any RPC
-sigil verify --bundle data/bundles/<run-id> --local-only
-
-# Anchor a bundle built earlier (e.g. after an RPC outage)
-sigil anchor --bundle data/bundles/<run-id>
-
-# Reproduce the accuracy table
-sigil benchmark
+sigil prove --image face.jpg               # check all four task requirements
+sigil benchmark                            # reproduce the accuracy table
 ```
 
 Exit codes are stable, because a failure must never render as a success:
