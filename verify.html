@@ -360,11 +360,10 @@ async function verify(files) {
   // 6. If the bundle carries a receipt, the address it names is a *convenience*, not a
   //    credential. Prefilling it saves typing; the verifier can replace it with any
   //    address, and the receipt's own root claim is cross-checked rather than trusted.
-  let receiptOk = true, haveReceipt = false;
+  let receiptOk = true, receipt = null;
   if (byName["receipt.json"]) {
     try {
-      const receipt = JSON.parse(await byName["receipt.json"].text());
-      haveReceipt = true;
+      receipt = JSON.parse(await byName["receipt.json"].text());
       receiptOk = String(receipt.evidence_root || "").toLowerCase() === claimed.toLowerCase();
       const addr = String(receipt.contract_address || "");
       const field = document.getElementById("contract");
@@ -378,10 +377,18 @@ async function verify(files) {
   }
 
   const ok = canonicalOk && rootOk && proofsOk && artifactsOk && receiptOk;
-  LAST = { root: claimed, computed, manifest };
+  LAST = { root: claimed, computed, manifest, receipt };
   document.getElementById("chain").disabled = false;
 
-  render(out, { ok, steps, computed, claimed, manifest, modified, added, removed });
+  render(out, { ok, steps, computed, claimed, manifest, receipt,
+                modified, added, removed });
+}
+
+function etherscanTx(receipt) {
+  if (!receipt || Number(receipt.chain_id) !== 11155111) return "";
+  const tx = String(receipt.transaction_hash || "");
+  return /^0x[0-9a-fA-F]{64}$/.test(tx)
+    ? `https://sepolia.etherscan.io/tx/${tx}` : "";
 }
 
 function render(out, r) {
@@ -402,6 +409,7 @@ function render(out, r) {
     </div>` : "";
 
   const p = r.manifest.post || {}, d = r.manifest.decision || {};
+  const explorer = etherscanTx(r.receipt);
   out.innerHTML = `
     <div class="card">
       <div class="verdict ${r.ok ? "ok" : "bad"}">
@@ -412,6 +420,8 @@ function render(out, r) {
         <tr><th>Root claimed</th><td class="mono">${r.claimed}</td></tr>
         <tr><th>Root computed here</th><td class="mono ${r.ok ? "ok" : "bad"}">${r.computed}</td></tr>
       </table>
+      ${explorer ? `<p><a class="btn" id="etherscan" href="${explorer}"
+        target="_blank" rel="noopener noreferrer">View transaction on Etherscan</a></p>` : ""}
     </div>
     ${tamper}
     <div class="card">
@@ -451,6 +461,10 @@ async function checkChain() {
   const box = document.getElementById("chainout");
   const rpc = document.getElementById("rpc").value.trim();
   const contract = document.getElementById("contract").value.trim();
+  const explorer = etherscanTx(LAST?.receipt);
+  const explorerLink = explorer
+    ? `<p><a class="btn" href="${explorer}" target="_blank" rel="noopener noreferrer">View transaction on Etherscan</a></p>`
+    : "";
   if (!LAST) return;
   if (!/^0x[0-9a-fA-F]{40}$/.test(contract)) {
     box.innerHTML = `<div class="card"><span class="bad">Enter the contract address.</span></div>`;
@@ -487,11 +501,12 @@ async function checkChain() {
         <tr><th>Schema version</th><td>${schema}</td></tr>
       </table>
       <p class="muted">Read with a plain <span class="mono">eth_call</span>, no wallet,
-         no private key. That is what makes it a proof.</p>` : ""}
+         no private key. That is what makes it a proof.</p>${explorerLink}` : ""}
     </div>`;
   } catch (err) {
     box.innerHTML = `<div class="card"><span class="bad">RPC error:</span>
-      <span class="muted">${esc(err.message)}</span></div>`;
+      <span class="muted">${esc(err.message)}</span>
+      ${explorerLink}</div>`;
   }
 }
 

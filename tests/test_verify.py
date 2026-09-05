@@ -405,3 +405,8 @@ class TestBrowserVerifier:
         source = self._source()
         assert 'byName["receipt.json"]' in source
         assert "contract_address" in source
+
+    def test_links_an_anchored_receipt_to_sepolia_etherscan(self):
+        source = self._source()
+        assert "https://sepolia.etherscan.io/tx/" in source
+        assert "View transaction on Etherscan" in source

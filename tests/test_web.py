@@ -291,6 +291,11 @@ class TestVerifierPage:
         assert mime == "text/html"
         assert b"VERIFY_SELECTOR" in body
 
+    def test_csp_allows_the_verifiers_default_sepolia_rpc(self, server):
+        with urllib.request.urlopen(f"{server}/verify", timeout=10) as response:
+            policy = response.headers["Content-Security-Policy"]
+        assert "https://ethereum-sepolia-rpc.publicnode.com" in policy
+
 
 class TestRunState:
     def test_serializes_without_leaking_internals(self):
