@@ -36,9 +36,8 @@ sigil prove --image data/samples/public_figure.jpg
 Requirements 3 and 4 run in a **separate process with `PRIVATE_KEY` unset**, because a
 proof you can only check from inside the program that produced it is not a proof.
 
-[`docs/TASK.md`](docs/TASK.md) maps each requirement to its code, its test
-and its command. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) covers the design decisions
-and [`docs/DEMO.md`](docs/DEMO.md) is the runbook for the recording.
+[`docs/TASK.md`](docs/TASK.md) maps each requirement to its code, its test and its
+command. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) covers the design decisions.
 
 ---
 

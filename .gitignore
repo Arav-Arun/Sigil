@@ -59,3 +59,7 @@ data/samples/*
 data/bundles/
 *.onnx
 scikit_learn_data/
+
+# Private demo prep: recording runbook, speaker script, anything staged for the
+# submission. Useful to keep beside the project, not something to publish.
+notes/

@@ -384,12 +384,17 @@ def rank(verifications: list[CandidateVerification]) -> list[CandidateVerificati
     it should be defensible on its own terms.
 
     It used to be a weighted sum of five hand-chosen coefficients over margin, media
-    quality, route agreement, face size and search rank. None of those weights was
-    measured, and four of the five were proxies for one thing: how much signal the
-    comparison had. Now that the match threshold is conditioned on face size, the margin
-    already carries that, a thumbnail is scored against a tighter bar and earns a smaller
-    margin for the same distance. So the extra terms are not just unmeasured, they are
-    redundant, and a single measured quantity is easier to defend than five invented ones.
+    quality, route agreement, face size and search rank. Not one of those weights was
+    measured, and four of the five were proxies for the same thing: how much signal the
+    comparison had. The distance margin is the only quantity here that is calibrated, so
+    ordering on it alone is the only ordering this module can actually defend.
+
+    Media quality genuinely does drop out as a result, and the honest reading is that two
+    verified candidates at the same distance now tie regardless of resolution. The floor
+    that protects against a thumbnail deciding anything is MIN_CANDIDATE_FACE_PX in the
+    gate above, not a ranking weight: below it the candidate is INCONCLUSIVE and never
+    reaches this function. A measured size penalty was tried and came back at zero, see
+    SIZE_PENALTIES.
 
     Two orderings survive as tie-break keys, and both are editorial rather than
     evidential: a social post outranks a news photograph because a social post is the
