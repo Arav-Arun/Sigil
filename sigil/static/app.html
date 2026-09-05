@@ -669,15 +669,42 @@ let PAGE = PAGE_STEP;
 let SHOW_REPOSTS = false;
 
 
-fetch("/api/config").then(r=>r.json()).then(c=>{
-  const missing=[];
-  if(!c.serpapi_configured) missing.push("SERPAPI_KEY not set");
-  if(!c.contract_address)   missing.push("CONTRACT_ADDRESS not set");
-  if(!missing.length) return;
-  const el=$("state");
-  el.classList.remove("hidden");
-  el.innerHTML=`<span class="dot warn"></span><span>${esc(missing.join(" · "))}</span>`;
-}).catch(()=>{});
+/* This page is also published as a static preview, with no pipeline behind it. Face
+   search needs the local Python stack and ~190 MB of model weights, so it cannot run
+   there. Say that plainly on the dropzone rather than letting someone drop a photo and
+   watch nothing happen. Everything that is genuinely static, the explainer, the live
+   Merkle demo, and the whole Verify Evidence page, works either way. */
+let STATIC_PREVIEW = false;
+
+function enterStaticPreview(){
+  STATIC_PREVIEW = true;
+  const dz = $("drop");
+  dz.onclick = null;
+  dz.style.cursor = "default";
+  dz.innerHTML = `
+    <div class="l1">Runs on your machine</div>
+    <div class="l2">not in this preview</div>
+    <div class="l3">Face search needs the local pipeline and about 190&nbsp;MB of model
+      weights, so it is not hosted. Clone the repo and run <code>sigil serve</code> to
+      use it. <a href="/verify">Verify Evidence</a> is fully working here, and so is the
+      fingerprint demo below.</div>`;
+  $("scatter").innerHTML = "";
+  $("try").classList.add("hidden");
+}
+
+const BACKEND = fetch("/api/config")
+  .then(r=>{ if(!r.ok) throw new Error("no backend"); return r.json(); })
+  .then(c=>{
+    const missing=[];
+    if(!c.serpapi_configured) missing.push("SERPAPI_KEY not set");
+    if(!c.contract_address)   missing.push("CONTRACT_ADDRESS not set");
+    if(!missing.length) return true;
+    const el=$("state");
+    el.classList.remove("hidden");
+    el.innerHTML=`<span class="dot warn"></span><span>${esc(missing.join(" · "))}</span>`;
+    return true;
+  })
+  .catch(()=>{ enterStaticPreview(); return false; });
 
 /* The scattered hero photos. Positions are fixed; the pictures come from
    data/samples/, so adding a face to that folder adds a tile and a demo at once.
@@ -703,7 +730,9 @@ const MAG = `<span class="mag"><svg viewBox="0 0 24 24" fill="none" stroke="curr
   stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle>
   <path d="M20 20l-4.2-4.2"></path></svg></span>`;
 
-fetch("/api/samples").then(r=>r.json()).then(d=>{
+BACKEND.then(ready=>{ if(!ready) return null; return fetch("/api/samples").then(r=>r.json()); })
+.then(d=>{
+  if(!d) return;
   const list=d.samples||[];
   if(!list.length){
     $("try").classList.remove("hidden");
@@ -861,12 +890,14 @@ const query=()=>new URLSearchParams({
 });
 
 async function submit(f){
+  if(STATIC_PREVIEW) return;
   const body=new FormData(); body.append("image",f,f.name||"upload.jpg");
   UPLOAD=URL.createObjectURL(f);
   await begin(fetch("/api/run?"+query(),{method:"POST",body}));
 }
 
 async function runSample(fileName,url){
+  if(STATIC_PREVIEW) return;
   UPLOAD=url;
   const q=query(); q.set("file",fileName);
   await begin(fetch("/api/run-sample?"+q,{method:"POST"}));

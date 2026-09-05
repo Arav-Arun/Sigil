@@ -338,3 +338,26 @@ def test_results_ui_separates_distinct_photos_from_source_image_reposts():
     assert ">Hacker House Goa</a>" in source
     assert "https://hhgoa.com" in source
     assert "Task 3</footer>" in source
+
+
+def test_landing_page_degrades_when_there_is_no_pipeline_behind_it():
+    """The page is also published statically, where face search cannot run.
+
+    Without this the hosted copy accepts a photo, posts it to an endpoint that is not
+    there, and appears to hang. The upload panel has to say so instead, and the entry
+    points have to refuse, because paste and drop can still reach them once the
+    affordance is swapped out.
+    """
+
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parent.parent / "sigil" / "static" / "app.html").read_text(
+        encoding="utf-8"
+    )
+
+    assert "function enterStaticPreview()" in source
+    # A 404 from a static host must be treated as "no backend", not parsed as config.
+    assert 'if(!r.ok) throw new Error("no backend")' in source
+    # Both entry points refuse, not just the dropzone click.
+    assert source.count("if(STATIC_PREVIEW) return;") >= 2
+    assert "Runs on your machine" in source

@@ -300,19 +300,24 @@ evidence format a format rather than one library's output.
 | ![Local verification listing every check that passed](docs/images/verify-local.jpg) | ![The on-chain record, with the registry identity confirmed](docs/images/verify-chain.jpg) |
 | **Rebuilt from the files, not trusted.** The root is recomputed from the manifest, every inclusion proof is checked, and every stored artifact is re-hashed. | **Read from the public chain.** No wallet and no account. The deployed bytecode is hashed first, so a look-alike contract cannot answer for the registry. |
 
-### Deploying the verifier
+### Deploying
 
-The verifier is a single static page with no build step and no backend, so it can be
-published anywhere. [`vercel.json`](vercel.json) copies it to `public/index.html` and
-serves that:
+Both pages are plain static HTML with no build step, so they publish anywhere.
+[`vercel.json`](vercel.json) copies them into `public/` and serves the landing page at
+`/` and the verifier at `/verify`:
 
 ```bash
 vercel deploy
 ```
 
-Only the verifier is deployed. The face-search app needs the local Python pipeline and
-about 190 MB of model weights, and `serve` binds to localhost on purpose, so there is
-nothing to host and good reason not to.
+**What works on the hosted copy:** the whole explainer, the live fingerprint demo, and
+the entire Verify Evidence page, including the on-chain read and the registry bytecode
+check. None of that needs a server.
+
+**What does not:** running a face search. That needs the local Python pipeline and about
+190 MB of model weights, and `serve` binds to localhost on purpose, so it is not hosted.
+The hosted landing page detects that there is no pipeline behind it and says so on the
+upload panel instead of accepting a photo and failing.
 
 ### Command line
 

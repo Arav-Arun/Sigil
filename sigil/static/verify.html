@@ -676,17 +676,13 @@ document.getElementById("dir").addEventListener("change", e => verify([...e.targ
 document.getElementById("files").addEventListener("change", e => verify([...e.target.files]));
 document.getElementById("chain").addEventListener("click", checkChain);
 
-/* This page is also published on its own, without the local face-search app behind it,
-   because checking a result should not require installing the thing that produced it.
-   In that deployment the links to the app point at routes that do not exist, so they are
-   removed rather than left to 404. The probe fails closed: from a file:// URL fetch
-   rejects outright, which is also a context where the app is not there. */
-fetch("/api/config", { method: "GET" })
-  .then(res => { if (!res.ok) throw new Error("no app"); })
-  .catch(() => {
-    document.querySelectorAll("[data-app-only]").forEach(el => el.remove());
-    document.querySelector(".brand").setAttribute("href", "/");
-  });
+/* Opened straight off the filesystem there is no site around this page, so the links to
+   the other one resolve to nowhere. Drop them rather than leave dead nav. Served over
+   http, by `sigil serve` or by the static host, both pages are always published
+   together, so the links are good. */
+if (location.protocol === "file:") {
+  document.querySelectorAll("[data-app-only]").forEach(el => el.remove());
+}
 </script>
 </body>
 </html>

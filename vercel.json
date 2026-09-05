@@ -1,9 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "mkdir -p public && cp sigil/static/verify.html public/index.html",
+  "buildCommand": "mkdir -p public && cp sigil/static/app.html public/index.html && cp sigil/static/verify.html public/verify.html",
   "outputDirectory": "public",
   "framework": null,
   "installCommand": "echo no dependencies to install",
+  "cleanUrls": true,
   "headers": [
     {
       "source": "/(.*)",
@@ -13,7 +14,7 @@
         { "key": "X-Frame-Options", "value": "DENY" },
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src https://ethereum-sepolia-rpc.publicnode.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https://ethereum-sepolia-rpc.publicnode.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
         }
       ]
     }
