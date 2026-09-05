@@ -210,7 +210,7 @@ PIVOT_DOMAINS = ("instagram.com", "x.com", "facebook.com", "linkedin.com", "yout
 
 
 def _site_query(entity: str, domains: tuple[str, ...] = PIVOT_DOMAINS) -> str:
-    cleaned = entity.strip().strip('"\'')
+    cleaned = entity.strip().strip("\"'")
     sites = " OR ".join(f"site:{domain}" for domain in domains)
     return f'"{cleaned}" ({sites})' if cleaned else sites
 
