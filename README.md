@@ -9,6 +9,7 @@ face image → live reverse-image search → verified social post → Merkle evi
 ```
 
 Built for **HH Goa 2026 Shortlisting Task 3**.
+[Screen recording of the full pipeline running end to end](https://youtu.be/MFIy4WFbPlU)
 
 | | |
 |:--|:--|
